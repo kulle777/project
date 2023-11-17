@@ -294,7 +294,7 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
     sobel_source = readFile("sobel.cl");
 
     cl_program program = clCreateProgramWithSource(g_context, 1, (const char**)&sobel_source, NULL, &status);
-    if(status != CL_SUCCESS){printf("Error: Create program\n");}
+    if(status != CL_SUCCESS){printf("Error: Create program. Errno %d\n",status);}
 
     status = clBuildProgram(program, g_numDevices, g_devices,NULL, NULL, NULL);
     if(status != CL_SUCCESS){
@@ -308,8 +308,8 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
     }
 
     cl_kernel kernel;
-    kernel = clCreateKernel(program, "sobel", &status);
-    if(status != CL_SUCCESS){printf("Error: Create kernel\n");}
+    kernel = clCreateKernel(program, "sobel3x3", &status);
+    if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
 
     /*
     // Associate the input and output buffers with the kernel
