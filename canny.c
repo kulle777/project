@@ -31,7 +31,7 @@ cl_mem g_buf_sobel_in;
 cl_mem g_buf_sobel_out_x;
 cl_mem g_buf_sobel_out_y;
 
-size_t g_framesize;
+size_t g_frame_amount;
 
 
 // Is used to find out frame times
@@ -291,7 +291,7 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
     // height and width determined as 16 bits -> max image size is 65 535 x 65 535 pixels
     cl_int status;
 
-    // Create a program with source code
+    // Create a program with source code, height
     char *sobel_source;
     sobel_source = readFile("sobel.cl");
 
@@ -323,49 +323,42 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
 
 
     // Write input array A to the device buffer bufferA
-    cl_event write_buf_event;
+    //cl_event write_buf_event;
     status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_in, CL_FALSE,
-        0, g_framesize, in, 0, NULL, &write_buf_event);
+        0, g_frame_amount*sizeof(uint8_t), in, 0, NULL, 0);
     if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
 
-/*
+
     // Define an index space (global work size) of work
     // items for execution. A workgroup size (local work size)
     // is not required, but can be used.
-    size_t globalWorkSize[1];
+    size_t globalWorkSize[2] = {width, height};     // 100x100 for x.pgm, 4444x4395 for hameensilta.pgm
 
-    // There are 'elements' work-items
-    globalWorkSize[0] = elements;
-
-    // Execute the kernel for execution
-    cl_event execution_event;
-    status = clEnqueueNDRangeKernel(g_cmdQueue, kernel, 1, NULL,
-        globalWorkSize, NULL, 0, NULL, &execution_event);
+    // Set the kernel for execution
+    //cl_event execution_event;
+    status = clEnqueueNDRangeKernel(g_cmdQueue, kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, 0);
+    if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
 
     // Read the device output buffer to the host output array
-    cl_event read_buf_event;
-    clEnqueueReadBuffer(g_cmdQueue, buf_sobel_out_x, CL_TRUE, 0,
-        datasize, C, 0, NULL, &read_buf_event);
+    //cl_event read_buf_event;
 
-    // Verify the output
-    int result = 1;
-    for(i = 0; i < elements; i++) {
-        if(C[i] != i+i) {
-            result = 0;
-            break;
-        }
-    }
-    if(result) {
-        printf("Output is correct\n");
-    } else {
-        printf("Output is incorrect\n");
-    }
-*/
+    //printf("%d\n",g_frame_amount*sizeof(int16_t));
+    //printf("%d\n",g_frame_amount*sizeof(int8_t));
 
+    // TODO: The bug is here. 2x the size in bytes read to stop error. But why?
+    // kun en ollut ees huomannut niin oli 8int eli vaara sisaantulo. mutta SEKIN toimi jos vaan tahan lisasi *2. Pitaa siis lukea enemman kuin bufferin pituus?
+    // KYLLA ! +1 riittaa. Jossain on off by 1 error
+    clEnqueueReadBuffer(g_cmdQueue, g_buf_sobel_out_x, CL_TRUE, 0, g_frame_amount*sizeof(int16_t)+1, output_x, 0, NULL, 0);
+    clEnqueueReadBuffer(g_cmdQueue, g_buf_sobel_out_y, CL_TRUE, 0, g_frame_amount*sizeof(int16_t)+1, output_y, 0, NULL, 0);
 
+    clFinish(g_cmdQueue);
+    printf("moi\n");
 
+    //size_t i = 0;
+    //for( ; i < g_frame_amount; ++i )
+    //printf("%d\n", in[i]);
 
-    // free(sobel_source)
+    //free(sobel_source);
 }
 
 //KALLE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! This is the function that we put our stuff into
@@ -394,24 +387,32 @@ cannyEdgeDetection(
     times[0] = gettimemono_ns();
     //sobel3x3(input, width, height, sobel_x, sobel_y);
     cl_sobel(input, width, height, sobel_x, sobel_y);
+    printf("cleared sobel\n");
 
     times[1] = gettimemono_ns();
     phaseAndMagnitude(sobel_x, sobel_y, width, height, phase, magnitude);
+    printf("cleared phase\n");
 
     times[2] = gettimemono_ns();
     nonMaxSuppression(
         magnitude, phase, width, height, threshold_lower, threshold_upper,
         output);
+    printf("cleared nonmax\n");
 
     times[3] = gettimemono_ns();
     edgeTracing(output, width, height);  // modifies output in-place
 
     times[4] = gettimemono_ns();
     // Release intermediate arrays
-    free(sobel_x);
+    printf("Before clear\n");
+    free(sobel_x);                              // crash happens
+    printf("Released sobel_x\n");
     free(sobel_y);
+    printf("Released sobel_y\n");
     free(phase);
+    printf("Released phase\n");
     free(magnitude);
+    printf("Made it after clear\n");
 
     for (int i = 0; i < 4; i++) {
         runtimes[i] = times[i + 1] - times[i];
@@ -428,12 +429,14 @@ init(
     size_t width, size_t height, uint16_t threshold_lower,
     uint16_t threshold_upper) {
 
-    // taken from main: size of input to cannyEdgeDetection is width*height*3 of uint8_t*
-    g_framesize = 8*width*height*3;
+    // taken from main: size of input to cannyEdgeDetection is width*height*3 of uint8_t
+    // Later however we may use int16 for example. Thus we must save just number but leave bit representation separate
+
+    g_frame_amount = width*height*3;
 
     // Host data
-    g_in = (uint8_t*)malloc(g_framesize);
-    g_out = (uint8_t*)malloc(g_framesize);
+    g_in = (uint8_t*)malloc(g_frame_amount*sizeof(uint8_t));
+    g_out = (uint8_t*)malloc(g_frame_amount*sizeof(uint8_t));
 
     /*
     char *vector_source;
@@ -478,10 +481,10 @@ init(
     g_cmdQueue = clCreateCommandQueue(g_context, g_devices[0], CL_QUEUE_PROFILING_ENABLE, &status);
 
     //buffers
-    g_buf_sobel_in = clCreateBuffer(g_context, CL_MEM_READ_ONLY, g_framesize, NULL, &status);
+    g_buf_sobel_in = clCreateBuffer(g_context, CL_MEM_READ_ONLY, g_frame_amount*sizeof(uint8_t), NULL, &status);
 
-    g_buf_sobel_out_x = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_framesize, NULL, &status);
-    g_buf_sobel_out_y = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_framesize, NULL, &status);
+    g_buf_sobel_out_x = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_frame_amount*sizeof(int16_t), NULL, &status);
+    g_buf_sobel_out_y = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_frame_amount*sizeof(int16_t), NULL, &status);
 
 }
 
