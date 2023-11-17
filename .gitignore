@@ -1,2 +1,4 @@
 *.pgm
 *.mp4
+canny
+*.autosave

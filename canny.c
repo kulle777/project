@@ -1,4 +1,4 @@
-/* COMP.CE.350 Parallelization Excercise 2023
+    /* COMP.CE.350 Parallelization Excercise 2023
    Copyright (c) 2023 Topi Leppanen topi.leppanen@tuni.fi
                       Jan Solanti
 
@@ -16,6 +16,15 @@ VERSION 23.0 - Created
 
 #include "util.h"
 
+// Globals by kalle
+cl_context g_context;
+cl_command_queue g_cmdQueue;
+
+cl_mem g_buf_sobel_in;
+cl_mem g_buf_sobel_out_x;
+cl_mem g_buf_sobel_out_y;
+
+
 // Is used to find out frame times
 int previousFinishTime = 0;
 unsigned int frameNumber = 0;
@@ -30,6 +39,31 @@ const coord_t neighbour_offsets[8] = {
     {-1, -1}, {0, -1},  {+1, -1}, {-1, 0},
     {+1, 0},  {-1, +1}, {0, +1},  {+1, +1},
 };
+
+
+char * readFile(char *file_name){
+    // Read the kernels from canny.cl
+    FILE *fp;
+    char *source_str;
+    size_t source_size, program_size;
+
+    fp = fopen(file_name, "rb");
+    if (!fp) {
+        printf("Failed to load kernel\n");
+    }
+
+    fseek(fp, 0, SEEK_END);
+    program_size = ftell(fp);
+    rewind(fp);
+    source_str = (char*)malloc(program_size + 1);
+    source_str[program_size] = '\0';
+    fread(source_str, sizeof(char), program_size, fp);
+    fclose(fp);
+    // Read done
+
+    return source_str;
+}
+
 
 // ## You may add your own variables here ##
 
@@ -242,6 +276,71 @@ edgeTracing(uint8_t *restrict image, size_t width, size_t height) {
 
 }
 
+void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
+              int16_t *restrict output_x, int16_t *restrict output_y){
+
+    char *sobel_source;
+    sobel_source = readFile("sobel.cl");
+
+    // Use this to check the output of each API call
+    cl_int status;
+
+    /*
+    // Write input array A to the device buffer bufferA
+    cl_event write_buf_event;
+    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_in, CL_FALSE,
+        0, datasize, A, 0, NULL, &write_buf_event);
+
+
+    // Create a program with source code
+    cl_program program = clCreateProgramWithSource(g_context, 1,
+        (const char**)&vector_source, NULL, &status);
+
+    // Build (compile) the program for the device
+    status = clBuildProgram(program, numDevices, devices,
+        NULL, NULL, NULL);
+
+    // Create the vector addition kernel
+    cl_kernel kernel;
+    kernel = clCreateKernel(program, "vecadd", &status);
+
+    // Associate the input and output buffers with the kernel
+    status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &g_buf_sobel_in);
+    status = clSetKernelArg(kernel, 2, sizeof(cl_mem), &buf_sobel_out_x);
+
+    // Define an index space (global work size) of work
+    // items for execution. A workgroup size (local work size)
+    // is not required, but can be used.
+    size_t globalWorkSize[1];
+
+    // There are 'elements' work-items
+    globalWorkSize[0] = elements;
+
+    // Execute the kernel for execution
+    cl_event execution_event;
+    status = clEnqueueNDRangeKernel(g_cmdQueue, kernel, 1, NULL,
+        globalWorkSize, NULL, 0, NULL, &execution_event);
+
+    // Read the device output buffer to the host output array
+    cl_event read_buf_event;
+    clEnqueueReadBuffer(g_cmdQueue, buf_sobel_out_x, CL_TRUE, 0,
+        datasize, C, 0, NULL, &read_buf_event);
+
+    // Verify the output
+    int result = 1;
+    for(i = 0; i < elements; i++) {
+        if(C[i] != i+i) {
+            result = 0;
+            break;
+        }
+    }
+    if(result) {
+        printf("Output is correct\n");
+    } else {
+        printf("Output is incorrect\n");
+    }
+    */
+}
 
 //KALLE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! This is the function that we put our stuff into
 void
@@ -294,28 +393,6 @@ cannyEdgeDetection(
 }
 
 
-char * readFile(char *file_name){
-    // Read the kernels from canny.cl
-    FILE *fp;
-    char *source_str;
-    size_t source_size, program_size;
-
-    fp = fopen(file_name, "rb");
-    if (!fp) {
-        printf("Failed to load kernel\n");
-    }
-
-    fseek(fp, 0, SEEK_END);
-    program_size = ftell(fp);
-    rewind(fp);
-    source_str = (char*)malloc(program_size + 1);
-    source_str[program_size] = '\0';
-    fread(source_str, sizeof(char), program_size, fp);
-    fclose(fp);
-    // Read done
-
-    return source_str;
-}
 
 
 // Needed only in Part 2 for OpenCL initialization
@@ -323,21 +400,16 @@ void
 init(
     size_t width, size_t height, uint16_t threshold_lower,
     uint16_t threshold_upper) {
-
+    /*
     char *vector_source;
     vector_source = readFile("vecadd.cl");
 
-    /*
-    char *sobel_source;
-    vector_source = readFile("sobel.cl");
-
     char *phase_source;
-    vector_source = readFile("phase.cl");
+    phase_source = readFile("phase.cl");
 
     char *nonmax_source;
-    vector_source = readFile("nonmax.cl");
+    nonmax_source = readFile("nonmax.cl");
     */
-
     // Host data
     int *A = NULL;  // Input array
     int *B = NULL;  // Input array
@@ -378,103 +450,31 @@ init(
 
     // Retrieve the number of devices
     cl_uint numDevices = 0;
-    status = clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_ALL, 0,
-        NULL, &numDevices);
+    status = clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
 
     // Allocate enough space for each device
     cl_device_id *devices;
-    devices = (cl_device_id*)malloc(
-        numDevices*sizeof(cl_device_id));
+    devices = (cl_device_id*)malloc(numDevices*sizeof(cl_device_id));
 
     // Fill in the devices
-    status = clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_ALL,
-        numDevices, devices, NULL);
+    status = clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_ALL, numDevices, devices, NULL);
 
     // Create a context and associate it with the devices
-    cl_context context;
-    context = clCreateContext(NULL, numDevices, devices, NULL,
-        NULL, &status);
+    g_context = clCreateContext(NULL, numDevices, devices, NULL, NULL, &status);
 
     // Create a command queue and associate it with the device
-    cl_command_queue cmdQueue;
-    cmdQueue = clCreateCommandQueue(context, devices[0], CL_QUEUE_PROFILING_ENABLE,
-        &status);
-    //cmdQueue = clCreateCommandQueueWithProperties(context, devices[0], CL_QUEUE_PROFILING_ENABLE, &status);
-    // Create a buffer object that will contain the data
-    // from the host array A
-    cl_mem bufA;
-    bufA = clCreateBuffer(context, CL_MEM_READ_ONLY, datasize,
-       NULL, &status);
-
-    // Create a buffer object that will contain the data
-    // from the host array B
-    cl_mem bufB;
-    bufB = clCreateBuffer(context, CL_MEM_READ_ONLY, datasize,
-        NULL, &status);
-
-    // Create a buffer object that will hold the output data
-    cl_mem bufC;
-    bufC = clCreateBuffer(context, CL_MEM_WRITE_ONLY, datasize,
-        NULL, &status);
-
-    // Write input array A to the device buffer bufferA
-    cl_event write_buf_event;
-    status = clEnqueueWriteBuffer(cmdQueue, bufA, CL_FALSE,
-        0, datasize, A, 0, NULL, &write_buf_event);
-
-    // Write input array B to the device buffer bufferB
-    status = clEnqueueWriteBuffer(cmdQueue, bufB, CL_FALSE,
-        0, datasize, B, 0, NULL, NULL);
+    g_cmdQueue = clCreateCommandQueue(g_context, devices[0], CL_QUEUE_PROFILING_ENABLE, &status);
 
 
-    // Create a program with source code
-    cl_program program = clCreateProgramWithSource(context, 1,
-        (const char**)&vector_source, NULL, &status);
 
-    // Build (compile) the program for the device
-    status = clBuildProgram(program, numDevices, devices,
-        NULL, NULL, NULL);
+    g_buf_sobel_in = clCreateBuffer(g_context, CL_MEM_READ_ONLY, datasize, NULL, &status);
 
-    // Create the vector addition kernel
-    cl_kernel kernel;
-    kernel = clCreateKernel(program, "vecadd", &status);
+    g_buf_sobel_out_x = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, datasize, NULL, &status);
+    g_buf_sobel_out_x = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, datasize, NULL, &status);
 
-    // Associate the input and output buffers with the kernel
-    status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufA);
-    status = clSetKernelArg(kernel, 1, sizeof(cl_mem), &bufB);
-    status = clSetKernelArg(kernel, 2, sizeof(cl_mem), &bufC);
 
-    // Define an index space (global work size) of work
-    // items for execution. A workgroup size (local work size)
-    // is not required, but can be used.
-    size_t globalWorkSize[1];
 
-    // There are 'elements' work-items
-    globalWorkSize[0] = elements;
 
-    // Execute the kernel for execution
-    cl_event execution_event;
-    status = clEnqueueNDRangeKernel(cmdQueue, kernel, 1, NULL,
-        globalWorkSize, NULL, 0, NULL, &execution_event);
-
-    // Read the device output buffer to the host output array
-    cl_event read_buf_event;
-    clEnqueueReadBuffer(cmdQueue, bufC, CL_TRUE, 0,
-        datasize, C, 0, NULL, &read_buf_event);
-
-    // Verify the output
-    int result = 1;
-    for(i = 0; i < elements; i++) {
-        if(C[i] != i+i) {
-            result = 0;
-            break;
-        }
-    }
-    if(result) {
-        printf("Output is correct\n");
-    } else {
-        printf("Output is incorrect\n");
-    }
 
 
 }
