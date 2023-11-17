@@ -17,8 +17,14 @@ VERSION 23.0 - Created
 #include "util.h"
 
 // Globals by kalle
+cl_platform_id *g_platforms;
+cl_device_id *g_devices;
 cl_context g_context;
 cl_command_queue g_cmdQueue;
+
+// Host data
+uint8_t *g_in;
+uint8_t *g_out;
 
 cl_mem g_buf_sobel_in;
 cl_mem g_buf_sobel_out_x;
@@ -400,6 +406,14 @@ void
 init(
     size_t width, size_t height, uint16_t threshold_lower,
     uint16_t threshold_upper) {
+
+    // taken from main: size of input to cannyEdgeDetection is width*height*3 of uint8_t*
+    size_t datasize = 8*width*height*3;
+
+    // Host data
+    g_in = (uint8_t*)malloc(datasize);
+    g_out = (uint8_t*)malloc(datasize);
+
     /*
     char *vector_source;
     vector_source = readFile("vecadd.cl");
@@ -410,28 +424,7 @@ init(
     char *nonmax_source;
     nonmax_source = readFile("nonmax.cl");
     */
-    // Host data
-    int *A = NULL;  // Input array
-    int *B = NULL;  // Input array
-    int *C = NULL;  // Output array
 
-    // Elements in each array
-    const int elements = 2048;
-
-    // Compute the size of the data
-    size_t datasize = sizeof(int)*elements;
-
-    // Allocate space for input/output data
-    A = (int*)malloc(datasize);
-    B = (int*)malloc(datasize);
-    C = (int*)malloc(datasize);
-
-    // Initialize the input data
-    int i;
-    for(i = 0; i < elements; i++) {
-        A[i] = i;
-        B[i] = i;
-    }
 
     // Use this to check the output of each API call
     cl_int status;
@@ -441,46 +434,55 @@ init(
     status = clGetPlatformIDs(0, NULL, &numPlatforms);
 
     // Allocate enough space for each platform
-    cl_platform_id *platforms = NULL;
-    platforms = (cl_platform_id*)malloc(
+    g_platforms = (cl_platform_id*)malloc(
         numPlatforms*sizeof(cl_platform_id));
 
     // Fill in the platforms
-    status = clGetPlatformIDs(numPlatforms, platforms, NULL);
+    status = clGetPlatformIDs(numPlatforms, g_platforms, NULL);
 
     // Retrieve the number of devices
     cl_uint numDevices = 0;
-    status = clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
+    status = clGetDeviceIDs(g_platforms[0], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
+    printf("We have %d devices\n", numDevices);
 
     // Allocate enough space for each device
-    cl_device_id *devices;
-    devices = (cl_device_id*)malloc(numDevices*sizeof(cl_device_id));
+    g_devices = (cl_device_id*)malloc(numDevices*sizeof(cl_device_id));
 
     // Fill in the devices
-    status = clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_ALL, numDevices, devices, NULL);
+    status = clGetDeviceIDs(g_platforms[0], CL_DEVICE_TYPE_ALL, numDevices, g_devices, NULL);
 
     // Create a context and associate it with the devices
-    g_context = clCreateContext(NULL, numDevices, devices, NULL, NULL, &status);
+    g_context = clCreateContext(NULL, numDevices, g_devices, NULL, NULL, &status);
 
     // Create a command queue and associate it with the device
-    g_cmdQueue = clCreateCommandQueue(g_context, devices[0], CL_QUEUE_PROFILING_ENABLE, &status);
+    g_cmdQueue = clCreateCommandQueue(g_context, g_devices[0], CL_QUEUE_PROFILING_ENABLE, &status);
 
 
 
     g_buf_sobel_in = clCreateBuffer(g_context, CL_MEM_READ_ONLY, datasize, NULL, &status);
 
     g_buf_sobel_out_x = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, datasize, NULL, &status);
-    g_buf_sobel_out_x = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, datasize, NULL, &status);
-
-
-
-
-
+    g_buf_sobel_out_y = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, datasize, NULL, &status);
 
 }
 
 void
-destroy() {}
+destroy() {
+    // Free OpenCL resources
+    //clReleaseKernel(kernel);
+    //clReleaseProgram(program);
+
+    clReleaseCommandQueue(g_cmdQueue);
+    clReleaseMemObject(g_buf_sobel_in);
+    clReleaseMemObject(g_buf_sobel_out_x);
+    clReleaseMemObject(g_buf_sobel_out_y);
+    clReleaseContext(g_context);
+
+    free(g_in);
+    free(g_out);
+    free(g_platforms);
+    free(g_devices);
+}
 
 ////////////////////////////////////////////////
 // ¤¤ DO NOT EDIT ANYTHING AFTER THIS LINE ¤¤ //
