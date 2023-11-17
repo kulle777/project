@@ -31,6 +31,8 @@ cl_mem g_buf_sobel_in;
 cl_mem g_buf_sobel_out_x;
 cl_mem g_buf_sobel_out_y;
 
+size_t g_framesize;
+
 
 // Is used to find out frame times
 int previousFinishTime = 0;
@@ -311,19 +313,22 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
     kernel = clCreateKernel(program, "sobel3x3", &status);
     if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
 
-    /*
+
     // Associate the input and output buffers with the kernel
     status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &g_buf_sobel_in);
-    status = clSetKernelArg(kernel, 2, sizeof(cl_mem), &buf_sobel_out_x);
-
+    status = clSetKernelArg(kernel, 1, sizeof(uint16_t), &width);
+    status = clSetKernelArg(kernel, 2, sizeof(uint16_t), &height);
+    status = clSetKernelArg(kernel, 3, sizeof(cl_mem), &g_buf_sobel_out_x);
+    status = clSetKernelArg(kernel, 4, sizeof(cl_mem), &g_buf_sobel_out_y);
 
 
     // Write input array A to the device buffer bufferA
     cl_event write_buf_event;
     status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_in, CL_FALSE,
-        0, datasize, A, 0, NULL, &write_buf_event);
+        0, g_framesize, in, 0, NULL, &write_buf_event);
+    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
 
-
+/*
     // Define an index space (global work size) of work
     // items for execution. A workgroup size (local work size)
     // is not required, but can be used.
@@ -355,7 +360,7 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
     } else {
         printf("Output is incorrect\n");
     }
-    */
+*/
 
 
 
@@ -424,11 +429,11 @@ init(
     uint16_t threshold_upper) {
 
     // taken from main: size of input to cannyEdgeDetection is width*height*3 of uint8_t*
-    size_t datasize = 8*width*height*3;
+    g_framesize = 8*width*height*3;
 
     // Host data
-    g_in = (uint8_t*)malloc(datasize);
-    g_out = (uint8_t*)malloc(datasize);
+    g_in = (uint8_t*)malloc(g_framesize);
+    g_out = (uint8_t*)malloc(g_framesize);
 
     /*
     char *vector_source;
@@ -473,10 +478,10 @@ init(
     g_cmdQueue = clCreateCommandQueue(g_context, g_devices[0], CL_QUEUE_PROFILING_ENABLE, &status);
 
     //buffers
-    g_buf_sobel_in = clCreateBuffer(g_context, CL_MEM_READ_ONLY, datasize, NULL, &status);
+    g_buf_sobel_in = clCreateBuffer(g_context, CL_MEM_READ_ONLY, g_framesize, NULL, &status);
 
-    g_buf_sobel_out_x = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, datasize, NULL, &status);
-    g_buf_sobel_out_y = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, datasize, NULL, &status);
+    g_buf_sobel_out_x = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_framesize, NULL, &status);
+    g_buf_sobel_out_y = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_framesize, NULL, &status);
 
 }
 
