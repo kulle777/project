@@ -18,6 +18,7 @@ VERSION 23.0 - Created
 
 // Globals by kalle
 cl_platform_id *g_platforms;
+cl_uint g_numDevices;
 cl_device_id *g_devices;
 cl_context g_context;
 cl_command_queue g_cmdQueue;
@@ -47,6 +48,7 @@ const coord_t neighbour_offsets[8] = {
 };
 
 
+// You need to free(source_string) after youre done
 char * readFile(char *file_name){
     // Read the kernels from canny.cl
     FILE *fp;
@@ -284,35 +286,43 @@ edgeTracing(uint8_t *restrict image, size_t width, size_t height) {
 
 void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
               int16_t *restrict output_x, int16_t *restrict output_y){
+    // height and width determined as 16 bits -> max image size is 65 535 x 65 535 pixels
+    cl_int status;
 
+    // Create a program with source code
     char *sobel_source;
     sobel_source = readFile("sobel.cl");
 
-    // Use this to check the output of each API call
-    cl_int status;
+    cl_program program = clCreateProgramWithSource(g_context, 1, (const char**)&sobel_source, NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: Create program\n");}
+
+    status = clBuildProgram(program, g_numDevices, g_devices,NULL, NULL, NULL);
+    if(status != CL_SUCCESS){
+        size_t log_size;
+        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
+        char* log = (char*)malloc(log_size);
+        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+        printf("Error: Build \n%s\n", log);
+        free(log);
+        return;
+    }
+
+    cl_kernel kernel;
+    kernel = clCreateKernel(program, "sobel", &status);
+    if(status != CL_SUCCESS){printf("Error: Create kernel\n");}
 
     /*
+    // Associate the input and output buffers with the kernel
+    status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &g_buf_sobel_in);
+    status = clSetKernelArg(kernel, 2, sizeof(cl_mem), &buf_sobel_out_x);
+
+
+
     // Write input array A to the device buffer bufferA
     cl_event write_buf_event;
     status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_in, CL_FALSE,
         0, datasize, A, 0, NULL, &write_buf_event);
 
-
-    // Create a program with source code
-    cl_program program = clCreateProgramWithSource(g_context, 1,
-        (const char**)&vector_source, NULL, &status);
-
-    // Build (compile) the program for the device
-    status = clBuildProgram(program, numDevices, devices,
-        NULL, NULL, NULL);
-
-    // Create the vector addition kernel
-    cl_kernel kernel;
-    kernel = clCreateKernel(program, "vecadd", &status);
-
-    // Associate the input and output buffers with the kernel
-    status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &g_buf_sobel_in);
-    status = clSetKernelArg(kernel, 2, sizeof(cl_mem), &buf_sobel_out_x);
 
     // Define an index space (global work size) of work
     // items for execution. A workgroup size (local work size)
@@ -346,6 +356,11 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
         printf("Output is incorrect\n");
     }
     */
+
+
+
+
+    // free(sobel_source)
 }
 
 //KALLE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! This is the function that we put our stuff into
@@ -372,7 +387,8 @@ cannyEdgeDetection(
     uint64_t times[5];
     // Canny edge detection algorithm consists of the following functions:
     times[0] = gettimemono_ns();
-    sobel3x3(input, width, height, sobel_x, sobel_y);
+    //sobel3x3(input, width, height, sobel_x, sobel_y);
+    cl_sobel(input, width, height, sobel_x, sobel_y);
 
     times[1] = gettimemono_ns();
     phaseAndMagnitude(sobel_x, sobel_y, width, height, phase, magnitude);
@@ -441,24 +457,22 @@ init(
     status = clGetPlatformIDs(numPlatforms, g_platforms, NULL);
 
     // Retrieve the number of devices
-    cl_uint numDevices = 0;
-    status = clGetDeviceIDs(g_platforms[0], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
-    printf("We have %d devices\n", numDevices);
+    status = clGetDeviceIDs(g_platforms[0], CL_DEVICE_TYPE_ALL, 0, NULL, &g_numDevices);
+    printf("We have %d devices\n", g_numDevices);
 
     // Allocate enough space for each device
-    g_devices = (cl_device_id*)malloc(numDevices*sizeof(cl_device_id));
+    g_devices = (cl_device_id*)malloc(g_numDevices*sizeof(cl_device_id));
 
     // Fill in the devices
-    status = clGetDeviceIDs(g_platforms[0], CL_DEVICE_TYPE_ALL, numDevices, g_devices, NULL);
+    status = clGetDeviceIDs(g_platforms[0], CL_DEVICE_TYPE_ALL, g_numDevices, g_devices, NULL);
 
     // Create a context and associate it with the devices
-    g_context = clCreateContext(NULL, numDevices, g_devices, NULL, NULL, &status);
+    g_context = clCreateContext(NULL, g_numDevices, g_devices, NULL, NULL, &status);
 
     // Create a command queue and associate it with the device
     g_cmdQueue = clCreateCommandQueue(g_context, g_devices[0], CL_QUEUE_PROFILING_ENABLE, &status);
 
-
-
+    //buffers
     g_buf_sobel_in = clCreateBuffer(g_context, CL_MEM_READ_ONLY, datasize, NULL, &status);
 
     g_buf_sobel_out_x = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, datasize, NULL, &status);

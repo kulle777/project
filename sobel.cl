@@ -8,9 +8,8 @@ size_t idx(size_t x, size_t y, size_t width, size_t height, int xoff, int yoff) 
     return resy * width + resx;
 }
 
-__kernel
-void sobel3x3(const uint8_t *restrict in, size_t width, size_t height,
-    int16_t *restrict output_x, int16_t *restrict output_y) {
+kernel void sobel3x3(global uchar *restrict in, ushort width, ushort height,
+    global short *restrict output_x, global short *restrict output_y) {
     // LOOP 1.1
     for (size_t y = 0; y < height; y++) {
         // LOOP 1.2
