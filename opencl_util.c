@@ -1,6 +1,7 @@
 /* COMP.CE.350 Parallelization Exercise util functions
    Copyright (c) 2023 Topi Leppanen topi.leppanen@tuni.fi
 */
+#define CL_TARGET_OPENCL_VERSION 300
 
 #include "opencl_util.h"
 

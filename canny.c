@@ -1,9 +1,16 @@
-    /* COMP.CE.350 Parallelization Excercise 2023
+/* COMP.CE.350 Parallelization Excercise 2023
    Copyright (c) 2023 Topi Leppanen topi.leppanen@tuni.fi
                       Jan Solanti
 
 VERSION 23.0 - Created
+
+Opencl implementation by Kalle Paasio
 */
+
+
+
+#define CL_TARGET_OPENCL_VERSION 300
+
 
 #include <assert.h>
 #include <math.h>
@@ -23,10 +30,6 @@ cl_uint g_numDevices;
 cl_device_id *g_devices;
 cl_context g_context;
 cl_command_queue g_cmdQueue;
-
-// Host data
-uint8_t *g_in;
-uint8_t *g_out;
 
 cl_mem g_buf_sobel_in;
 cl_mem g_buf_sobel_out_x;
@@ -53,145 +56,6 @@ const coord_t neighbour_offsets[8] = {
     {+1, 0},  {-1, +1}, {0, +1},  {+1, +1},
 };
 
-
-// ## You may add your own variables here ##
-
-// Utility function to convert 2d index with offset to linear index
-// Uses clamp-to-edge out-of-bounds handling
-size_t idx(size_t x, size_t y, size_t width, size_t height, int xoff, int yoff) {
-    size_t resx = x;
-    if ((xoff > 0 && x < width - xoff) || (xoff < 0 && x >= (-xoff)))
-        resx += xoff;
-    size_t resy = y;
-    if ((yoff > 0 && y < height - yoff) || (yoff < 0 && y >= (-yoff)))
-        resy += yoff;
-    return resy * width + resx;
-}
-
-void sobel3x3(const uint8_t *restrict in, size_t width, size_t height,
-    int16_t *restrict output_x, int16_t *restrict output_y) {
-    // LOOP 1.1
-    for (size_t y = 0; y < height; y++) {
-        // LOOP 1.2
-        for (size_t x = 0; x < width; x++) {
-            size_t gid = y * width + x;
-                        
-            //3x3 sobel filter, first in x direction
-            output_x[gid] = - in[idx(x, y, width, height, -1, -1)] +
-                            in[idx(x, y, width, height, 1, -1)] -
-                            2 * in[idx(x, y, width, height, -1, 0)] +
-                            2 * in[idx(x, y, width, height, 1, 0)] -
-                            in[idx(x, y, width, height, -1, 1)] +
-                            in[idx(x, y, width, height, 1, 1)];
-
-            //3x3 sobel filter, in y direction
-            output_y[gid] = - in[idx(x, y, width, height, -1, -1)] +
-                            in[idx(x, y, width, height, -1, 1)] -
-                            2 * in[idx(x, y, width, height, 0, -1)] +
-                            2 * in[idx(x, y, width, height, 0, 1)] -
-                            in[idx(x, y, width, height, 1, -1)] +
-                            in[idx(x, y, width, height, 1, 1)];
-        }
-    }
-}
-
-void phaseAndMagnitude(const int16_t *restrict in_x, const int16_t *restrict in_y, size_t width,
-    size_t height, uint8_t *restrict phase_out,
-    uint16_t *restrict magnitude_out) {
-    // LOOP 2.1
-    
-    // we COULD separate phase and magnitude, but it is not fast
-    // Unroll indexes and pre calculate weights
-    for (size_t id = 0; id<width*height;id++){
-        // Do memory operations serially before moving to split phases
-        int16_t y=in_y[id];
-        int16_t x=in_x[id];
-
-        float angle = atan2f(y, x);
-        angle *= 40.5845104884;
-        angle += 128;
-        phase_out[id] = (uint8_t)angle;
-
-        magnitude_out[id] = abs(x) + abs(y);
-    }
-}
-
-void nonMaxSuppression(const uint16_t *restrict magnitude, const uint8_t *restrict phase,
-    size_t width, size_t height, int16_t threshold_lower,
-    uint16_t threshold_upper, uint8_t *restrict out) {
-    // LOOP 3.1
-    for (size_t y = 0; y < height; y++) {
-        // LOOP 3.2
-        for (size_t x = 0; x < width; x++) {
-            size_t gid = y * width + x;
-
-            uint8_t sobel_angle = phase[gid];
-
-            if (sobel_angle > 127) {
-                sobel_angle -= 128;
-            }
-
-            int sobel_orientation = 0;
-
-            if (sobel_angle < 16 || sobel_angle >= (7 * 16)) {
-                sobel_orientation = 2;
-            } else if (sobel_angle >= 16 && sobel_angle < 16 * 3) {
-                sobel_orientation = 1;
-            } else if (sobel_angle >= 16 * 3 && sobel_angle < 16 * 5) {
-                sobel_orientation = 0;
-            } else if (sobel_angle > 16 * 5 && sobel_angle <= 16 * 7) {
-                sobel_orientation = 3;
-            }
-
-            uint16_t sobel_magnitude = magnitude[gid];
-            /* Non-maximum suppression
-             * Pick out the two neighbours that are perpendicular to the
-             * current edge pixel */
-            uint16_t neighbour_max = 0;
-            uint16_t neighbour_max2 = 0;
-            switch (sobel_orientation) {
-                case 0:
-                    neighbour_max =
-                        magnitude[idx(x, y, width, height, 0, -1)];
-                    neighbour_max2 =
-                        magnitude[idx(x, y, width, height, 0, 1)];
-                    break;
-                case 1:
-                    neighbour_max =
-                        magnitude[idx(x, y, width, height, -1, -1)];
-                    neighbour_max2 =
-                        magnitude[idx(x, y, width, height, 1, 1)];
-                    break;
-                case 2:
-                    neighbour_max =
-                        magnitude[idx(x, y, width, height, -1, 0)];
-                    neighbour_max2 =
-                        magnitude[idx(x, y, width, height, 1, 0)];
-                    break;
-                case 3:
-                default:
-                    neighbour_max =
-                        magnitude[idx(x, y, width, height, 1, -1)];
-                    neighbour_max2 =
-                        magnitude[idx(x, y, width, height, -1, 1)];
-                    break;
-            }
-            // Suppress the pixel here
-            if ((sobel_magnitude < neighbour_max) ||
-                (sobel_magnitude < neighbour_max2)) {
-                sobel_magnitude = 0;
-            }
-
-            /* Double thresholding */
-            // Marks YES pixels with 255, NO pixels with 0 and MAYBE pixels
-            // with 127
-            uint8_t t = 127;
-            if (sobel_magnitude > threshold_upper) t = 255;
-            if (sobel_magnitude <= threshold_lower) t = 0;
-            out[gid] = t;
-        }
-    }
-}
 
 void
 edgeTracing(uint8_t *restrict image, size_t width, size_t height) {
@@ -265,8 +129,7 @@ edgeTracing(uint8_t *restrict image, size_t width, size_t height) {
 
 }
 
-void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
-              int16_t *restrict output_x, int16_t *restrict output_y){
+void cl_sobel(const uint8_t *restrict in, size_t width, size_t height){
     // height and width determined as 16 bits -> max image size is 65 535 x 65 535 pixels
     cl_int status;
 
@@ -298,7 +161,6 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
     status = clSetKernelArg(kernel, 1, sizeof(cl_mem), &g_buf_sobel_out_x);
     status = clSetKernelArg(kernel, 2, sizeof(cl_mem), &g_buf_sobel_out_y);
 
-
     //cl_event write_buf_event;
     status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_in, CL_FALSE,
         0, g_image_size*sizeof(uint8_t), in, 0, NULL, 0);
@@ -311,19 +173,15 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
     status = clEnqueueNDRangeKernel(g_cmdQueue, kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, 0);
     if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
 
-    //cl_event read_buf_event;
-    clEnqueueReadBuffer(g_cmdQueue, g_buf_sobel_out_x, CL_FALSE, 0, g_image_size*sizeof(int16_t), output_x, 0, NULL, 0);
-    clEnqueueReadBuffer(g_cmdQueue, g_buf_sobel_out_y, CL_FALSE, 0, g_image_size*sizeof(int16_t), output_y, 0, NULL, 0);
-
     clFinish(g_cmdQueue);
 
     free(sobel_source);
+    clReleaseKernel(kernel);
+    clReleaseProgram(program);
 }
 
 
-void cl_phase(const int16_t *restrict in_x, const int16_t *restrict in_y, size_t width,
-              size_t height, uint8_t *restrict phase_out,
-              uint16_t *restrict magnitude_out){
+void cl_phase(size_t width, size_t height){
     cl_int status;
 
     char *phase_source;
@@ -355,32 +213,20 @@ void cl_phase(const int16_t *restrict in_x, const int16_t *restrict in_y, size_t
     status = clSetKernelArg(kernel, 3, sizeof(cl_mem), &g_buf_magnitude_out);
 
 
-    //cl_event write_buf_event;
-    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_out_x, CL_FALSE,
-        0, g_image_size*sizeof(int16_t), in_x, 0, NULL, 0);
-    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
-
-    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_out_y, CL_FALSE,
-        0, g_image_size*sizeof(int16_t), in_y, 0, NULL, 0);
-    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
-
     size_t globalWorkSize[1] = {width*height};
 
     //cl_event execution_event;
     status = clEnqueueNDRangeKernel(g_cmdQueue, kernel, 1, NULL, globalWorkSize, NULL, 0, NULL, 0);
     if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
 
-    //cl_event read_buf_event;
-    clEnqueueReadBuffer(g_cmdQueue, g_buf_phase_out, CL_FALSE, 0, g_image_size*sizeof(uint8_t), phase_out, 0, NULL, 0);
-    clEnqueueReadBuffer(g_cmdQueue, g_buf_magnitude_out, CL_FALSE, 0, g_image_size*sizeof(uint16_t), magnitude_out, 0, NULL, 0);
-
     clFinish(g_cmdQueue);
 
     free(phase_source);
+    clReleaseKernel(kernel);
+    clReleaseProgram(program);
 }
 
-void cl_nonmax(const uint16_t *restrict magnitude, const uint8_t *restrict phase,
-               size_t width, size_t height, uint16_t threshold_lower,
+void cl_nonmax(size_t width, size_t height, uint16_t threshold_lower,
                uint16_t threshold_upper, uint8_t *restrict out){
     cl_int status;
     char *nonmax_source;
@@ -412,15 +258,6 @@ void cl_nonmax(const uint16_t *restrict magnitude, const uint8_t *restrict phase
     status = clSetKernelArg(kernel, 3, sizeof(cl_ushort), &high);
     status = clSetKernelArg(kernel, 4, sizeof(cl_mem), &g_buf_nonmax_out);
 
-
-    //cl_event write_buf_event;
-    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_phase_out, CL_FALSE,
-        0, g_image_size*sizeof(int8_t), phase, 0, NULL, 0);
-    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
-    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_magnitude_out, CL_FALSE,
-        0, g_image_size*sizeof(uint16_t), magnitude, 0, NULL, 0);
-    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
-
     size_t globalWorkSize[2] = {width,height};
 
     //cl_event execution_event;
@@ -433,6 +270,8 @@ void cl_nonmax(const uint16_t *restrict magnitude, const uint8_t *restrict phase
     clFinish(g_cmdQueue);
 
     free(nonmax_source);
+    clReleaseKernel(kernel);
+    clReleaseProgram(program);
 }
 
 
@@ -442,52 +281,28 @@ cannyEdgeDetection(
     uint8_t *restrict input, size_t width, size_t height,
     uint16_t threshold_lower, uint16_t threshold_upper,
     uint8_t *restrict output, double *restrict runtimes) {
-    size_t image_size = width * height;
-
-    // Allocate arrays for intermediate results
-    int16_t *sobel_x = malloc(image_size * sizeof(int16_t));
-    assert(sobel_x);
-
-    int16_t *sobel_y = malloc(image_size * sizeof(int16_t));
-    assert(sobel_y);
-
-    uint8_t *phase = malloc(image_size * sizeof(uint8_t));
-    assert(phase);
-
-    uint16_t *magnitude = malloc(image_size * sizeof(uint16_t));
-    assert(magnitude);
 
     uint64_t times[5];
     // Canny edge detection algorithm consists of the following functions:
     times[0] = gettimemono_ns();
-    //sobel3x3(input, width, height, sobel_x, sobel_y);
-    cl_sobel(input, width, height, sobel_x, sobel_y);
+    cl_sobel(input, width, height);
 
     times[1] = gettimemono_ns();
-    //phaseAndMagnitude(sobel_x, sobel_y, width, height, phase, magnitude);
-    cl_phase(sobel_x, sobel_y, width, height, phase, magnitude);
+    cl_phase(width, height);
 
     times[2] = gettimemono_ns();
-    //nonMaxSuppression(magnitude, phase, width, height, threshold_lower, threshold_upper, output);
-    cl_nonmax(magnitude, phase, width, height, threshold_lower, threshold_upper, output);
+    cl_nonmax(width, height, threshold_lower, threshold_upper, output);
 
     times[3] = gettimemono_ns();
     edgeTracing(output, width, height);  // modifies output in-place
 
     times[4] = gettimemono_ns();
-    // Release intermediate arrays
-    free(sobel_x);
-    free(sobel_y);
-    free(phase);
-    free(magnitude);
 
     for (int i = 0; i < 4; i++) {
         runtimes[i] = times[i + 1] - times[i];
         runtimes[i] /= 1000000.0;  // Convert ns to ms
     }
 }
-
-
 
 
 // Needed only in Part 2 for OpenCL initialization
@@ -497,10 +312,6 @@ init(
     uint16_t threshold_upper) {
 
     g_image_size = width*height;
-
-    // Host data
-    g_in = (uint8_t*)malloc(g_image_size*sizeof(uint8_t));
-    g_out = (uint8_t*)malloc(g_image_size*sizeof(uint8_t));
 
     // Use this to check the output of each API call
     cl_int status;
@@ -533,7 +344,8 @@ init(
     if(status != CL_SUCCESS){printf("Error: clCreateContext. Err no %d\n",status);}
 
     // Create a command queue and associate it with the device
-    g_cmdQueue = clCreateCommandQueue(g_context, g_devices[0], CL_QUEUE_PROFILING_ENABLE, &status);
+    cl_queue_properties proprt[] = {CL_QUEUE_PROFILING_ENABLE};
+    g_cmdQueue = clCreateCommandQueueWithProperties(g_context, g_devices[0], proprt, &status);
     if(status != CL_SUCCESS){printf("Error: clCreateCommandQueue. Err no %d\n",status);}
 
     //buffers
@@ -573,17 +385,15 @@ init(
 void
 destroy() {
     // Free OpenCL resources
-    //clReleaseKernel(kernel);
-    //clReleaseProgram(program);
-
     clReleaseCommandQueue(g_cmdQueue);
     clReleaseMemObject(g_buf_sobel_in);
     clReleaseMemObject(g_buf_sobel_out_x);
     clReleaseMemObject(g_buf_sobel_out_y);
+    clReleaseMemObject(g_buf_phase_out);
+    clReleaseMemObject(g_buf_magnitude_out);
+    clReleaseMemObject(g_buf_nonmax_out);
     clReleaseContext(g_context);
 
-    free(g_in);
-    free(g_out);
     free(g_platforms);
     free(g_devices);
 }
