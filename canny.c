@@ -31,7 +31,7 @@ cl_mem g_buf_sobel_in;
 cl_mem g_buf_sobel_out_x;
 cl_mem g_buf_sobel_out_y;
 
-size_t g_frame_amount;
+size_t g_image_size;
 
 
 // Is used to find out frame times
@@ -316,16 +316,13 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
 
     // Associate the input and output buffers with the kernel
     status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &g_buf_sobel_in);
-    status = clSetKernelArg(kernel, 1, sizeof(uint16_t), &width);
-    status = clSetKernelArg(kernel, 2, sizeof(uint16_t), &height);
-    status = clSetKernelArg(kernel, 3, sizeof(cl_mem), &g_buf_sobel_out_x);
-    status = clSetKernelArg(kernel, 4, sizeof(cl_mem), &g_buf_sobel_out_y);
+    status = clSetKernelArg(kernel, 1, sizeof(cl_mem), &g_buf_sobel_out_x);
+    status = clSetKernelArg(kernel, 2, sizeof(cl_mem), &g_buf_sobel_out_y);
 
 
-    // Write input array A to the device buffer bufferA
     //cl_event write_buf_event;
     status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_in, CL_FALSE,
-        0, g_frame_amount*sizeof(uint8_t), in, 0, NULL, 0);
+        0, g_image_size*sizeof(uint8_t), in, 0, NULL, 0);
     if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
 
 
@@ -345,11 +342,8 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
     //printf("%d\n",g_frame_amount*sizeof(int16_t));
     //printf("%d\n",g_frame_amount*sizeof(int8_t));
 
-    // TODO: The bug is here. 2x the size in bytes read to stop error. But why?
-    // kun en ollut ees huomannut niin oli 8int eli vaara sisaantulo. mutta SEKIN toimi jos vaan tahan lisasi *2. Pitaa siis lukea enemman kuin bufferin pituus?
-    // KYLLA ! +1 riittaa. Jossain on off by 1 error
-    clEnqueueReadBuffer(g_cmdQueue, g_buf_sobel_out_x, CL_TRUE, 0, g_frame_amount*sizeof(int16_t)+1, output_x, 0, NULL, 0);
-    clEnqueueReadBuffer(g_cmdQueue, g_buf_sobel_out_y, CL_TRUE, 0, g_frame_amount*sizeof(int16_t)+1, output_y, 0, NULL, 0);
+    clEnqueueReadBuffer(g_cmdQueue, g_buf_sobel_out_x, CL_TRUE, 0, g_image_size*sizeof(int16_t), output_x, 0, NULL, 0);
+    clEnqueueReadBuffer(g_cmdQueue, g_buf_sobel_out_y, CL_TRUE, 0, g_image_size*sizeof(int16_t), output_y, 0, NULL, 0);
 
     clFinish(g_cmdQueue);
     printf("moi\n");
@@ -429,14 +423,11 @@ init(
     size_t width, size_t height, uint16_t threshold_lower,
     uint16_t threshold_upper) {
 
-    // taken from main: size of input to cannyEdgeDetection is width*height*3 of uint8_t
-    // Later however we may use int16 for example. Thus we must save just number but leave bit representation separate
-
-    g_frame_amount = width*height*3;
+    g_image_size = width*height;
 
     // Host data
-    g_in = (uint8_t*)malloc(g_frame_amount*sizeof(uint8_t));
-    g_out = (uint8_t*)malloc(g_frame_amount*sizeof(uint8_t));
+    g_in = (uint8_t*)malloc(g_image_size*sizeof(uint8_t));
+    g_out = (uint8_t*)malloc(g_image_size*sizeof(uint8_t));
 
     /*
     char *vector_source;
@@ -463,9 +454,12 @@ init(
 
     // Fill in the platforms
     status = clGetPlatformIDs(numPlatforms, g_platforms, NULL);
+    if(status != CL_SUCCESS){printf("Error: clGetPlatformIDs. Err no %d\n",status);}
 
     // Retrieve the number of devices
     status = clGetDeviceIDs(g_platforms[0], CL_DEVICE_TYPE_ALL, 0, NULL, &g_numDevices);
+    if(status != CL_SUCCESS){printf("Error: clGetDeviceIDs. Err no %d\n",status);}
+
     printf("We have %d devices\n", g_numDevices);
 
     // Allocate enough space for each device
@@ -473,18 +467,24 @@ init(
 
     // Fill in the devices
     status = clGetDeviceIDs(g_platforms[0], CL_DEVICE_TYPE_ALL, g_numDevices, g_devices, NULL);
+    if(status != CL_SUCCESS){printf("Error: clGetDeviceIDs2. Err no %d\n",status);}
 
     // Create a context and associate it with the devices
     g_context = clCreateContext(NULL, g_numDevices, g_devices, NULL, NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: clCreateContext. Err no %d\n",status);}
 
     // Create a command queue and associate it with the device
     g_cmdQueue = clCreateCommandQueue(g_context, g_devices[0], CL_QUEUE_PROFILING_ENABLE, &status);
+    if(status != CL_SUCCESS){printf("Error: clCreateCommandQueue. Err no %d\n",status);}
 
     //buffers
-    g_buf_sobel_in = clCreateBuffer(g_context, CL_MEM_READ_ONLY, g_frame_amount*sizeof(uint8_t), NULL, &status);
+    g_buf_sobel_in = clCreateBuffer(g_context, CL_MEM_READ_ONLY, g_image_size*sizeof(uint8_t), NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_in. Err no %d\n",status);}
 
-    g_buf_sobel_out_x = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_frame_amount*sizeof(int16_t), NULL, &status);
-    g_buf_sobel_out_y = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_frame_amount*sizeof(int16_t), NULL, &status);
+    g_buf_sobel_out_x = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_image_size*sizeof(int16_t), NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_out_x. Err no %d\n",status);}
+    g_buf_sobel_out_y = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_image_size*sizeof(int16_t), NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_out_y. Err no %d\n",status);}
 
 }
 

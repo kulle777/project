@@ -8,33 +8,35 @@ uint idx(ushort x, ushort y, ushort width, ushort height, ushort xoff, ushort yo
     return resy * width + resx;
 }
 
-kernel void sobel3x3(global uchar *restrict in, ushort width, ushort height,
-    global short *restrict output_x, global short *restrict output_y) {
+kernel void sobel3x3(global uchar *restrict in, global short *restrict output_x, global short *restrict output_y) {
 
-    int i = get_global_id(0);
-    int j = get_global_id(1);
+    int x = get_global_id(0);
+    int y = get_global_id(1);
+
+    ushort width = get_global_size(0);
+    ushort height = get_global_size(0);
 
     // Dont run on the edge
     //if(i == 0 | i == width) return;
     //if(j == 0 | j == height)  return;
 
-    uint gid = j*width + i;
+    uint gid = y*width + x;
 
 
     //3x3 sobel filter, first in x direction
-    output_x[gid] = - in[idx(i, j, width, height, -1, -1)] +
-                    in[idx(i, j, width, height, 1, -1)] -
-                    2 * in[idx(i, j, width, height, -1, 0)] +
-                    2 * in[idx(i, j, width, height, 1, 0)] -
-                    in[idx(i, j, width, height, -1, 1)] +
-                    in[idx(i, j, width, height, 1, 1)];
+    output_x[gid] = - in[idx(x, y, width, height, -1, -1)] +
+                    in[idx(x, y, width, height, 1, -1)] -
+                    2 * in[idx(x, y, width, height, -1, 0)] +
+                    2 * in[idx(x, y, width, height, 1, 0)] -
+                    in[idx(x, y, width, height, -1, 1)] +
+                    in[idx(x, y, width, height, 1, 1)];
 
     //3x3 sobel filter, in y direction
-    output_y[gid] = - in[idx(i, j, width, height, -1, -1)] +
-                    in[idx(i, j, width, height, -1, 1)] -
-                    2 * in[idx(i, j, width, height, 0, -1)] +
-                    2 * in[idx(i, j, width, height, 0, 1)] -
-                    in[idx(i, j, width, height, 1, -1)] +
-                    in[idx(i, j, width, height, 1, 1)];
+    output_y[gid] = - in[idx(x, y, width, height, -1, -1)] +
+                    in[idx(x, y, width, height, -1, 1)] -
+                    2 * in[idx(x, y, width, height, 0, -1)] +
+                    2 * in[idx(x, y, width, height, 0, 1)] -
+                    in[idx(x, y, width, height, 1, -1)] +
+                    in[idx(x, y, width, height, 1, 1)];
 
 }
