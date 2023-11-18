@@ -1,4 +1,4 @@
-uint idx(ushort x, ushort y, ushort width, ushort height, ushort xoff, ushort yoff) {
+uint idx(ushort x, ushort y, ushort width, ushort height, short xoff, short yoff) {
     ushort resx = x;
     if ((xoff > 0 && x < width - xoff) || (xoff < 0 && x >= (-xoff)))
         resx += xoff;
@@ -10,18 +10,13 @@ uint idx(ushort x, ushort y, ushort width, ushort height, ushort xoff, ushort yo
 
 kernel void sobel3x3(global uchar *restrict in, global short *restrict output_x, global short *restrict output_y) {
 
-    int x = get_global_id(0);
-    int y = get_global_id(1);
+    ushort x = get_global_id(0);
+    ushort y = get_global_id(1);
 
     ushort width = get_global_size(0);
     ushort height = get_global_size(0);
 
-    // Dont run on the edge
-    //if(i == 0 | i == width) return;
-    //if(j == 0 | j == height)  return;
-
     uint gid = y*width + x;
-
 
     //3x3 sobel filter, first in x direction
     output_x[gid] = - in[idx(x, y, width, height, -1, -1)] +

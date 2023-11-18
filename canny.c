@@ -325,10 +325,6 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
         0, g_image_size*sizeof(uint8_t), in, 0, NULL, 0);
     if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
 
-
-    // Define an index space (global work size) of work
-    // items for execution. A workgroup size (local work size)
-    // is not required, but can be used.
     size_t globalWorkSize[2] = {width, height};     // 100x100 for x.pgm, 4444x4395 for hameensilta.pgm
 
     // Set the kernel for execution
@@ -336,23 +332,13 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
     status = clEnqueueNDRangeKernel(g_cmdQueue, kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, 0);
     if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
 
-    // Read the device output buffer to the host output array
     //cl_event read_buf_event;
-
-    //printf("%d\n",g_frame_amount*sizeof(int16_t));
-    //printf("%d\n",g_frame_amount*sizeof(int8_t));
-
-    clEnqueueReadBuffer(g_cmdQueue, g_buf_sobel_out_x, CL_TRUE, 0, g_image_size*sizeof(int16_t), output_x, 0, NULL, 0);
-    clEnqueueReadBuffer(g_cmdQueue, g_buf_sobel_out_y, CL_TRUE, 0, g_image_size*sizeof(int16_t), output_y, 0, NULL, 0);
+    clEnqueueReadBuffer(g_cmdQueue, g_buf_sobel_out_x, CL_FALSE, 0, g_image_size*sizeof(int16_t), output_x, 0, NULL, 0);
+    clEnqueueReadBuffer(g_cmdQueue, g_buf_sobel_out_y, CL_FALSE, 0, g_image_size*sizeof(int16_t), output_y, 0, NULL, 0);
 
     clFinish(g_cmdQueue);
-    printf("moi\n");
 
-    //size_t i = 0;
-    //for( ; i < g_frame_amount; ++i )
-    //printf("%d\n", in[i]);
-
-    //free(sobel_source);
+    free(sobel_source);
 }
 
 //KALLE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! This is the function that we put our stuff into
