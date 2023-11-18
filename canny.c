@@ -32,6 +32,9 @@ cl_mem g_buf_sobel_out_x;
 cl_mem g_buf_sobel_out_y;
 cl_mem g_buf_phase_out;
 cl_mem g_buf_magnitude_out;
+cl_mem g_buf_nonmax_out;
+cl_mem g_buf_threshold_lower;
+cl_mem g_buf_threshold_upper;
 
 size_t g_image_size;
 
@@ -57,7 +60,7 @@ char * readFile(char *file_name){
     // Read the kernels from canny.cl
     FILE *fp;
     char *source_str;
-    size_t source_size, program_size;
+    size_t program_size;
 
     fp = fopen(file_name, "rb");
     if (!fp) {
@@ -402,6 +405,71 @@ void cl_phase(const int16_t *restrict in_x, const int16_t *restrict in_y, size_t
     free(phase_source);
 }
 
+void cl_nonmax(const uint16_t *restrict magnitude, const uint8_t *restrict phase,
+               size_t width, size_t height, int16_t threshold_lower,
+               uint16_t threshold_upper, uint8_t *restrict out){
+    cl_int status;
+
+    char *nonmax_source;
+    nonmax_source = readFile("nonmax.cl");
+
+    cl_program program = clCreateProgramWithSource(g_context, 1, (const char**)&nonmax_source, NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: Create program. Errno %d\n",status);}
+
+    status = clBuildProgram(program, g_numDevices, g_devices,NULL, NULL, NULL);
+    if(status != CL_SUCCESS){
+        size_t log_size;
+        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
+        char* log = (char*)malloc(log_size);
+        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+        printf("Error: Build \n%s\n", log);
+        free(log);
+        return;
+    }
+
+    cl_kernel kernel;
+    kernel = clCreateKernel(program, "nonMaxSuppression", &status);
+    if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
+
+    // Associate the input and output buffers with the kernel
+    status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &g_buf_phase_out);
+    status = clSetKernelArg(kernel, 1, sizeof(cl_mem), &g_buf_magnitude_out);
+    status = clSetKernelArg(kernel, 2, sizeof(cl_mem), &g_buf_threshold_lower);
+    status = clSetKernelArg(kernel, 3, sizeof(cl_mem), &g_buf_threshold_upper);
+    status = clSetKernelArg(kernel, 4, sizeof(cl_mem), &g_buf_nonmax_out);
+
+
+    //cl_event write_buf_event;
+    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_phase_out, CL_FALSE,
+        0, g_image_size*sizeof(int8_t), phase, 0, NULL, 0);
+    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
+    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_magnitude_out, CL_FALSE,
+        0, g_image_size*sizeof(uint16_t), magnitude, 0, NULL, 0);
+    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
+
+    // The params need to be sent via buffers
+    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_threshold_lower, CL_FALSE,
+        0, sizeof(int16_t), &threshold_lower, 0, NULL, 0);
+    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
+    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_threshold_upper, CL_FALSE,
+        0, sizeof(uint16_t), &threshold_upper, 0, NULL, 0);
+    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
+
+
+    size_t globalWorkSize[2] = {width,height};
+
+    //cl_event execution_event;
+    status = clEnqueueNDRangeKernel(g_cmdQueue, kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, 0);
+    if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
+
+    //cl_event read_buf_event;
+    clEnqueueReadBuffer(g_cmdQueue, g_buf_nonmax_out, CL_FALSE, 0, g_image_size*sizeof(uint8_t), out, 0, NULL, 0);
+
+    clFinish(g_cmdQueue);
+
+    free(nonmax_source);
+}
+
 
 //KALLE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! This is the function that we put our stuff into
 void
@@ -429,32 +497,22 @@ cannyEdgeDetection(
     times[0] = gettimemono_ns();
     //sobel3x3(input, width, height, sobel_x, sobel_y);
     cl_sobel(input, width, height, sobel_x, sobel_y);
-    printf("cleared sobel\n");
 
     times[1] = gettimemono_ns();
     cl_phase(sobel_x, sobel_y, width, height, phase, magnitude);
-    printf("cleared phase\n");
 
     times[2] = gettimemono_ns();
-    nonMaxSuppression(
-        magnitude, phase, width, height, threshold_lower, threshold_upper,
-        output);
-    printf("cleared nonmax\n");
+    cl_nonmax(magnitude, phase, width, height, threshold_lower, threshold_upper, output);
 
     times[3] = gettimemono_ns();
     edgeTracing(output, width, height);  // modifies output in-place
 
     times[4] = gettimemono_ns();
     // Release intermediate arrays
-    printf("Before clear\n");
-    free(sobel_x);                              // crash happens
-    printf("Released sobel_x\n");
+    free(sobel_x);
     free(sobel_y);
-    printf("Released sobel_y\n");
     free(phase);
-    printf("Released phase\n");
     free(magnitude);
-    printf("Made it after clear\n");
 
     for (int i = 0; i < 4; i++) {
         runtimes[i] = times[i + 1] - times[i];
@@ -477,18 +535,6 @@ init(
     g_in = (uint8_t*)malloc(g_image_size*sizeof(uint8_t));
     g_out = (uint8_t*)malloc(g_image_size*sizeof(uint8_t));
 
-    /*
-    char *vector_source;
-    vector_source = readFile("vecadd.cl");
-
-    char *phase_source;
-    phase_source = readFile("phase.cl");
-
-    char *nonmax_source;
-    nonmax_source = readFile("nonmax.cl");
-    */
-
-
     // Use this to check the output of each API call
     cl_int status;
 
@@ -507,8 +553,6 @@ init(
     // Retrieve the number of devices
     status = clGetDeviceIDs(g_platforms[0], CL_DEVICE_TYPE_ALL, 0, NULL, &g_numDevices);
     if(status != CL_SUCCESS){printf("Error: clGetDeviceIDs. Err no %d\n",status);}
-
-    printf("We have %d devices\n", g_numDevices);
 
     // Allocate enough space for each device
     g_devices = (cl_device_id*)malloc(g_numDevices*sizeof(cl_device_id));
@@ -534,11 +578,18 @@ init(
     g_buf_sobel_out_y = clCreateBuffer(g_context, CL_MEM_READ_WRITE, g_image_size*sizeof(int16_t), NULL, &status);
     if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_out_y. Err no %d\n",status);}
 
-    g_buf_phase_out = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_image_size*sizeof(uint8_t), NULL, &status);
+    g_buf_phase_out = clCreateBuffer(g_context, CL_MEM_READ_WRITE, g_image_size*sizeof(uint8_t), NULL, &status);
     if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_out_x. Err no %d\n",status);}
-    g_buf_magnitude_out = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_image_size*sizeof(uint16_t), NULL, &status);
+    g_buf_magnitude_out = clCreateBuffer(g_context, CL_MEM_READ_WRITE, g_image_size*sizeof(uint16_t), NULL, &status);
     if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_out_y. Err no %d\n",status);}
 
+    g_buf_nonmax_out = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_image_size*sizeof(uint8_t), NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_out_x. Err no %d\n",status);}
+
+    g_buf_threshold_lower = clCreateBuffer(g_context, CL_MEM_READ_ONLY, g_image_size*sizeof(int16_t), NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_in. Err no %d\n",status);}
+    g_buf_threshold_upper = clCreateBuffer(g_context, CL_MEM_READ_ONLY, g_image_size*sizeof(uint16_t), NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_in. Err no %d\n",status);}
 }
 
 void

@@ -11,7 +11,6 @@ SOURCES += \
 
 DISTFILES += \
     Makefile \
-    canny.cl \
     nonmax.cl \
     phase.cl \
     sobel.cl \
