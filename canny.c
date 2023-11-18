@@ -30,6 +30,8 @@ uint8_t *g_out;
 cl_mem g_buf_sobel_in;
 cl_mem g_buf_sobel_out_x;
 cl_mem g_buf_sobel_out_y;
+cl_mem g_buf_phase_out;
+cl_mem g_buf_magnitude_out;
 
 size_t g_image_size;
 
@@ -291,7 +293,7 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
     // height and width determined as 16 bits -> max image size is 65 535 x 65 535 pixels
     cl_int status;
 
-    // Create a program with source code, height
+    // Create a program with source code
     char *sobel_source;
     sobel_source = readFile("sobel.cl");
 
@@ -341,6 +343,66 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
     free(sobel_source);
 }
 
+
+void cl_phase(const int16_t *restrict in_x, const int16_t *restrict in_y, size_t width,
+              size_t height, uint8_t *restrict phase_out,
+              uint16_t *restrict magnitude_out){
+    cl_int status;
+
+    char *phase_source;
+    phase_source = readFile("phase.cl");
+
+    cl_program program = clCreateProgramWithSource(g_context, 1, (const char**)&phase_source, NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: Create program. Errno %d\n",status);}
+
+    status = clBuildProgram(program, g_numDevices, g_devices,NULL, NULL, NULL);
+    if(status != CL_SUCCESS){
+        size_t log_size;
+        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
+        char* log = (char*)malloc(log_size);
+        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+        printf("Error: Build \n%s\n", log);
+        free(log);
+        return;
+    }
+
+    cl_kernel kernel;
+    kernel = clCreateKernel(program, "phaseAndMagnitude", &status);
+    if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
+
+
+    // Associate the input and output buffers with the kernel
+    status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &g_buf_sobel_out_x);
+    status = clSetKernelArg(kernel, 1, sizeof(cl_mem), &g_buf_sobel_out_y);
+    status = clSetKernelArg(kernel, 2, sizeof(cl_mem), &g_buf_phase_out);
+    status = clSetKernelArg(kernel, 3, sizeof(cl_mem), &g_buf_magnitude_out);
+
+
+    //cl_event write_buf_event;
+    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_out_x, CL_FALSE,
+        0, g_image_size*sizeof(int16_t), in_x, 0, NULL, 0);
+    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
+
+    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_out_y, CL_FALSE,
+        0, g_image_size*sizeof(int16_t), in_y, 0, NULL, 0);
+    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
+
+    size_t globalWorkSize[1] = {width*height};
+
+    //cl_event execution_event;
+    status = clEnqueueNDRangeKernel(g_cmdQueue, kernel, 1, NULL, globalWorkSize, NULL, 0, NULL, 0);
+    if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
+
+    //cl_event read_buf_event;
+    clEnqueueReadBuffer(g_cmdQueue, g_buf_phase_out, CL_FALSE, 0, g_image_size*sizeof(uint8_t), phase_out, 0, NULL, 0);
+    clEnqueueReadBuffer(g_cmdQueue, g_buf_magnitude_out, CL_FALSE, 0, g_image_size*sizeof(uint16_t), magnitude_out, 0, NULL, 0);
+
+    clFinish(g_cmdQueue);
+
+    free(phase_source);
+}
+
+
 //KALLE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! This is the function that we put our stuff into
 void
 cannyEdgeDetection(
@@ -370,7 +432,7 @@ cannyEdgeDetection(
     printf("cleared sobel\n");
 
     times[1] = gettimemono_ns();
-    phaseAndMagnitude(sobel_x, sobel_y, width, height, phase, magnitude);
+    cl_phase(sobel_x, sobel_y, width, height, phase, magnitude);
     printf("cleared phase\n");
 
     times[2] = gettimemono_ns();
@@ -467,9 +529,14 @@ init(
     g_buf_sobel_in = clCreateBuffer(g_context, CL_MEM_READ_ONLY, g_image_size*sizeof(uint8_t), NULL, &status);
     if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_in. Err no %d\n",status);}
 
-    g_buf_sobel_out_x = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_image_size*sizeof(int16_t), NULL, &status);
+    g_buf_sobel_out_x = clCreateBuffer(g_context, CL_MEM_READ_WRITE, g_image_size*sizeof(int16_t), NULL, &status);
     if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_out_x. Err no %d\n",status);}
-    g_buf_sobel_out_y = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_image_size*sizeof(int16_t), NULL, &status);
+    g_buf_sobel_out_y = clCreateBuffer(g_context, CL_MEM_READ_WRITE, g_image_size*sizeof(int16_t), NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_out_y. Err no %d\n",status);}
+
+    g_buf_phase_out = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_image_size*sizeof(uint8_t), NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_out_x. Err no %d\n",status);}
+    g_buf_magnitude_out = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_image_size*sizeof(uint16_t), NULL, &status);
     if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_out_y. Err no %d\n",status);}
 
 }
