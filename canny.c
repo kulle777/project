@@ -407,7 +407,7 @@ void cl_phase(const int16_t *restrict in_x, const int16_t *restrict in_y, size_t
 }
 
 void cl_nonmax(const uint16_t *restrict magnitude, const uint8_t *restrict phase,
-               size_t width, size_t height, int16_t threshold_lower,
+               size_t width, size_t height, uint16_t threshold_lower,
                uint16_t threshold_upper, uint8_t *restrict out){
     cl_int status;
     char *nonmax_source;
@@ -446,13 +446,13 @@ void cl_nonmax(const uint16_t *restrict magnitude, const uint8_t *restrict phase
 
     // The params need to be sent via buffers
     // Only thing is that they havent been allocated memory yet
-    int16_t* low = malloc(sizeof(int16_t));
+    uint16_t* low = malloc(sizeof(uint16_t));
     *low = threshold_lower;
     uint16_t* high = malloc(sizeof(uint16_t));
     *high = threshold_upper;
 
     status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_threshold_lower, CL_FALSE,
-        0, sizeof(int16_t), &low, 0, NULL, 0);
+        0, sizeof(uint16_t), &low, 0, NULL, 0);
     if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
     status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_threshold_upper, CL_FALSE,
         0, sizeof(uint16_t), &high, 0, NULL, 0);
@@ -591,7 +591,7 @@ init(
     g_buf_nonmax_out = clCreateBuffer(g_context, CL_MEM_WRITE_ONLY, g_image_size*sizeof(uint8_t), NULL, &status);
     if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_out_x. Err no %d\n",status);}
 
-    g_buf_threshold_lower = clCreateBuffer(g_context, CL_MEM_READ_ONLY, g_image_size*sizeof(int16_t), NULL, &status);
+    g_buf_threshold_lower = clCreateBuffer(g_context, CL_MEM_READ_ONLY, g_image_size*sizeof(uint16_t), NULL, &status);
     if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_in. Err no %d\n",status);}
     g_buf_threshold_upper = clCreateBuffer(g_context, CL_MEM_READ_ONLY, g_image_size*sizeof(uint16_t), NULL, &status);
     if(status != CL_SUCCESS){printf("Error: clCreateBuffer g_buf_sobel_in. Err no %d\n",status);}

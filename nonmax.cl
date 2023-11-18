@@ -10,7 +10,7 @@ uint idx(ushort x, ushort y, ushort width, ushort height, short xoff, short yoff
 
 __kernel
 void nonMaxSuppression(global ushort *restrict magnitude, global uchar *restrict phase,
-         global short* threshold_lower, global ushort* threshold_upper, global uchar *restrict out) {
+         global ushort* threshold_lower, global ushort* threshold_upper, global uchar *restrict out) {
 
     ushort x = get_global_id(0);
     ushort y = get_global_id(1);
@@ -26,7 +26,7 @@ void nonMaxSuppression(global ushort *restrict magnitude, global uchar *restrict
         sobel_angle -= 128;
     }
 
-    int sobel_orientation = 0;
+    ushort sobel_orientation = 0;
 
     if (sobel_angle < 16 || sobel_angle >= (7 * 16)) {
         sobel_orientation = 2;
@@ -81,8 +81,8 @@ void nonMaxSuppression(global ushort *restrict magnitude, global uchar *restrict
     // Marks YES pixels with 255, NO pixels with 0 and MAYBE pixels
     // with 127
     uchar t = 127;
-    if (sobel_magnitude > threshold_upper) t = 255;
-    if (sobel_magnitude <= threshold_lower) t = 0;
+    if (sobel_magnitude > *threshold_upper){ t = 255;}
+    if (sobel_magnitude <= *threshold_lower){ t = 0;}
     out[gid] = t;
 
 }
