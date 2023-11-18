@@ -448,11 +448,17 @@ void cl_nonmax(const uint16_t *restrict magnitude, const uint8_t *restrict phase
     if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
 
     // The params need to be sent via buffers
+    // Only thing is that they havent been allocated memory yet
+    int16_t* low = malloc(sizeof(int16_t));
+    *low = threshold_lower;
+    uint16_t* high = malloc(sizeof(uint16_t));
+    *high = threshold_upper;
+
     status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_threshold_lower, CL_FALSE,
-        0, sizeof(int16_t), &threshold_lower, 0, NULL, 0);
+        0, sizeof(int16_t), &low, 0, NULL, 0);
     if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
     status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_threshold_upper, CL_FALSE,
-        0, sizeof(uint16_t), &threshold_upper, 0, NULL, 0);
+        0, sizeof(uint16_t), &high, 0, NULL, 0);
     if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
 
 
@@ -468,6 +474,8 @@ void cl_nonmax(const uint16_t *restrict magnitude, const uint8_t *restrict phase
     clFinish(g_cmdQueue);
 
     free(nonmax_source);
+    free(low);
+    free(high);
 }
 
 

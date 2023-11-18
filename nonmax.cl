@@ -10,7 +10,7 @@ uint idx(ushort x, ushort y, ushort width, ushort height, short xoff, short yoff
 
 __kernel
 void nonMaxSuppression(global ushort *restrict magnitude, global uchar *restrict phase,
-         short threshold_lower, ushort threshold_upper, global uchar *restrict out) {
+         global short* threshold_lower, global ushort* threshold_upper, global uchar *restrict out) {
 
     ushort x = get_global_id(0);
     ushort y = get_global_id(1);
