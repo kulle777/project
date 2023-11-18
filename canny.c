@@ -15,6 +15,7 @@ VERSION 23.0 - Created
 #include <CL/cl.h>
 
 #include "util.h"
+#include "opencl_util.h"
 
 // Globals by kalle
 cl_platform_id *g_platforms;
@@ -73,9 +74,9 @@ char * readFile(char *file_name){
     source_str = (char*)malloc(program_size + 1);
     source_str[program_size] = '\0';
     fread(source_str, sizeof(char), program_size, fp);
+
     fclose(fp);
     // Read done
-
     return source_str;
 }
 
@@ -298,7 +299,7 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height,
 
     // Create a program with source code
     char *sobel_source;
-    sobel_source = readFile("sobel.cl");
+    sobel_source = read_source("sobel.cl");
 
     cl_program program = clCreateProgramWithSource(g_context, 1, (const char**)&sobel_source, NULL, &status);
     if(status != CL_SUCCESS){printf("Error: Create program. Errno %d\n",status);}
@@ -353,7 +354,7 @@ void cl_phase(const int16_t *restrict in_x, const int16_t *restrict in_y, size_t
     cl_int status;
 
     char *phase_source;
-    phase_source = readFile("phase.cl");
+    phase_source = read_source("phase.cl");
 
     cl_program program = clCreateProgramWithSource(g_context, 1, (const char**)&phase_source, NULL, &status);
     if(status != CL_SUCCESS){printf("Error: Create program. Errno %d\n",status);}
@@ -409,14 +410,11 @@ void cl_nonmax(const uint16_t *restrict magnitude, const uint8_t *restrict phase
                size_t width, size_t height, int16_t threshold_lower,
                uint16_t threshold_upper, uint8_t *restrict out){
     cl_int status;
-
     char *nonmax_source;
-    nonmax_source = readFile("nonmax.cl");
-
+    nonmax_source = read_source("nonmax.cl");
     cl_program program = clCreateProgramWithSource(g_context, 1, (const char**)&nonmax_source, NULL, &status);
     if(status != CL_SUCCESS){printf("Error: Create program. Errno %d\n",status);}
-
-    status = clBuildProgram(program, g_numDevices, g_devices,NULL, NULL, NULL);
+    status = clBuildProgram(program, g_numDevices, g_devices,"-Werror", NULL, NULL);
     if(status != CL_SUCCESS){
         size_t log_size;
         clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
@@ -426,7 +424,6 @@ void cl_nonmax(const uint16_t *restrict magnitude, const uint8_t *restrict phase
         free(log);
         return;
     }
-
     cl_kernel kernel;
     kernel = clCreateKernel(program, "nonMaxSuppression", &status);
     if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
