@@ -1,8 +1,8 @@
 uint idx(ushort x, ushort y, ushort width, ushort height, short xoff, short yoff) {
-    ushort resx = x;
+    short resx = x;
     if ((xoff > 0 && x < width - xoff) || (xoff < 0 && x >= (-xoff)))
         resx += xoff;
-    ushort resy = y;
+    short resy = y;
     if ((yoff > 0 && y < height - yoff) || (yoff < 0 && y >= (-yoff)))
         resy += yoff;
     return resy * width + resx;
@@ -10,13 +10,13 @@ uint idx(ushort x, ushort y, ushort width, ushort height, short xoff, short yoff
 
 __kernel
 void nonMaxSuppression(global ushort *restrict magnitude, global uchar *restrict phase,
-         global ushort* threshold_lower, global ushort* threshold_upper, global uchar *restrict out) {
+         ushort threshold_lower, ushort threshold_upper, global uchar *restrict out) {
 
     ushort x = get_global_id(0);
     ushort y = get_global_id(1);
 
     ushort width = get_global_size(0);
-    ushort height = get_global_size(0);
+    ushort height = get_global_size(1);
 
     uint gid = y * width + x;
 
@@ -81,8 +81,8 @@ void nonMaxSuppression(global ushort *restrict magnitude, global uchar *restrict
     // Marks YES pixels with 255, NO pixels with 0 and MAYBE pixels
     // with 127
     uchar t = 127;
-    if (sobel_magnitude > *threshold_upper){ t = 255;}
-    if (sobel_magnitude <= *threshold_lower){ t = 0;}
+    if (sobel_magnitude > threshold_upper){ t = 255;}
+    if (sobel_magnitude <= threshold_lower){ t = 0;}
     out[gid] = t;
 
 }

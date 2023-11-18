@@ -4,7 +4,7 @@ __kernel void phaseAndMagnitude(global short *restrict in_x, global short *restr
     uint id = get_global_id(0);
 
     ushort width = get_global_size(0);
-    ushort height = get_global_size(0);
+    ushort height = get_global_size(1);
 
     short y=in_y[id];
     short x=in_x[id];

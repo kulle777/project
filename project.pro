@@ -6,15 +6,12 @@ CONFIG -= qt
 SOURCES += \
         canny.c \
         opencl_util.c \
-        util.c \
-        vectoradd.c
+        util.c
 
 DISTFILES += \
-    Makefile \
     nonmax.cl \
     phase.cl \
-    sobel.cl \
-    vecadd.cl
+    sobel.cl
 
 HEADERS += \
     #canny.c# \

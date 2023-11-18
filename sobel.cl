@@ -1,8 +1,8 @@
 uint idx(ushort x, ushort y, ushort width, ushort height, short xoff, short yoff) {
-    ushort resx = x;
+    short resx = x;
     if ((xoff > 0 && x < width - xoff) || (xoff < 0 && x >= (-xoff)))
         resx += xoff;
-    ushort resy = y;
+    short resy = y;
     if ((yoff > 0 && y < height - yoff) || (yoff < 0 && y >= (-yoff)))
         resy += yoff;
     return resy * width + resx;
@@ -14,7 +14,7 @@ kernel void sobel3x3(global uchar *restrict in, global short *restrict output_x,
     ushort y = get_global_id(1);
 
     ushort width = get_global_size(0);
-    ushort height = get_global_size(0);
+    ushort height = get_global_size(1);
 
     uint gid = y*width + x;
 
