@@ -132,52 +132,36 @@ edgeTracing(uint8_t *restrict image, size_t width, size_t height) {
 
 }
 
-void cl_sobel(const uint8_t *restrict in, size_t width, size_t height){
+void cl_sobel(size_t width, size_t height, cl_event* event){
     // height and width determined as 16 bits -> max image size is 65 535 x 65 535 pixels
     cl_int status;
 
-    //cl_event write_buf_event;
-    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_in, CL_FALSE, 0, g_image_size*sizeof(uint8_t), in, 0, NULL, 0);
-    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
-
     size_t globalWorkSize[2] = {width, height};     // 100x100 for x.pgm, 4444x4395 for hameensilta.pgm
 
-    //cl_event execution_event;
-    status = clEnqueueNDRangeKernel(g_cmdQueue, g_sobel_kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, 0);
+    status = clEnqueueNDRangeKernel(g_cmdQueue, g_sobel_kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, event);
     if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
-
-    clFinish(g_cmdQueue);
 }
 
 
-void cl_phase(size_t width, size_t height){
+void cl_phase(size_t width, size_t height, cl_event* event){
     cl_int status;
 
 
     size_t globalWorkSize[1] = {width*height};
 
     //cl_event execution_event;
-    status = clEnqueueNDRangeKernel(g_cmdQueue, g_phase_kernel, 1, NULL, globalWorkSize, NULL, 0, NULL, 0);
+    status = clEnqueueNDRangeKernel(g_cmdQueue, g_phase_kernel, 1, NULL, globalWorkSize, NULL, 0, NULL, event);
     if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
-
-    clFinish(g_cmdQueue);
 }
 
-void cl_nonmax(size_t width, size_t height, uint16_t threshold_lower,
-               uint16_t threshold_upper, uint8_t *restrict out){
+void cl_nonmax(size_t width, size_t height, cl_event* event){
     cl_int status;
 
     size_t globalWorkSize[2] = {width,height};
 
     //cl_event execution_event;
-    status = clEnqueueNDRangeKernel(g_cmdQueue, g_nonmax_kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, 0);
-    if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
-
-    //cl_event read_buf_event;
-    status = clEnqueueReadBuffer(g_cmdQueue, g_buf_nonmax_out, CL_FALSE, 0, g_image_size*sizeof(uint8_t), out, 0, NULL, 0);
-    if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
-
-    clFinish(g_cmdQueue);
+    status = clEnqueueNDRangeKernel(g_cmdQueue, g_nonmax_kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, event);
+    if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}   
 }
 
 
@@ -189,20 +173,42 @@ cannyEdgeDetection(
     uint8_t *restrict output, double *restrict runtimes) {
 
     uint64_t times[5];
-    // Canny edge detection algorithm consists of the following functions:
+    cl_int status;
+
+    cl_event write_buf_event;
+    cl_event read_buf_event;
+    cl_event sobel_event;
+    cl_event phase_event;
+    cl_event nonmax_event;
+
+    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_in, CL_FALSE, 0, g_image_size*sizeof(uint8_t), input, 0, NULL, &write_buf_event);
+    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
+
     times[0] = gettimemono_ns();
-    cl_sobel(input, width, height);
+
+    cl_sobel(width, height, &sobel_event);
 
     times[1] = gettimemono_ns();
-    cl_phase(width, height);
+    cl_phase(width, height, &phase_event);
 
+    // I count moving data back from nonmax as part of nonmax
     times[2] = gettimemono_ns();
-    cl_nonmax(width, height, threshold_lower, threshold_upper, output);
+    cl_nonmax(width, height, &nonmax_event);
+    status = clEnqueueReadBuffer(g_cmdQueue, g_buf_nonmax_out, CL_FALSE, 0, g_image_size*sizeof(uint8_t), output, 0, NULL, &read_buf_event);
+    if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
+    clFinish(g_cmdQueue);
 
     times[3] = gettimemono_ns();
     edgeTracing(output, width, height);  // modifies output in-place
 
     times[4] = gettimemono_ns();
+
+
+    printf("Time for clEnqueueWriteBuffer: %.2f ms\n", (float)(getStartEndTime(write_buf_event))/1000000);
+    printf("Time for sobel: %.2f ms\n", (float)(getStartEndTime(sobel_event))/1000000);
+    printf("Time for phase: %.2f ms\n", (float)(getStartEndTime(phase_event))/1000000);
+    printf("Time for nonmax: %.2f ms\n", (float)(getStartEndTime(nonmax_event))/1000000);
+    printf("Time for clEnqueueReadBuffer: %.2f ms\n", (float)(getStartEndTime(read_buf_event))/1000000);
 
     for (int i = 0; i < 4; i++) {
         runtimes[i] = times[i + 1] - times[i];
@@ -250,7 +256,7 @@ init(
     if(status != CL_SUCCESS){printf("Error: clCreateContext. Err no %d\n",status);}
 
     // Create a command queue and associate it with the device
-    cl_queue_properties proprt[] = {CL_QUEUE_PROFILING_ENABLE};
+    cl_queue_properties proprt[] = {CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0};
     g_cmdQueue = clCreateCommandQueueWithProperties(g_context, g_devices[0], proprt, &status);
     if(status != CL_SUCCESS){printf("Error: clCreateCommandQueue. Err no %d\n",status);}
 
@@ -373,6 +379,8 @@ init(
 
 void
 destroy() {
+
+
     // Free OpenCL resources
     clReleaseKernel(g_nonmax_kernel);
     clReleaseKernel(g_phase_kernel);
