@@ -8,7 +8,6 @@ Opencl implementation by Kalle Paasio
 */
 
 
-
 #define CL_TARGET_OPENCL_VERSION 300
 
 
@@ -138,8 +137,7 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height){
     cl_int status;
 
     //cl_event write_buf_event;
-    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_in, CL_FALSE,
-        0, g_image_size*sizeof(uint8_t), in, 0, NULL, 0);
+    status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_in, CL_FALSE, 0, g_image_size*sizeof(uint8_t), in, 0, NULL, 0);
     if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
 
     size_t globalWorkSize[2] = {width, height};     // 100x100 for x.pgm, 4444x4395 for hameensilta.pgm
@@ -176,7 +174,8 @@ void cl_nonmax(size_t width, size_t height, uint16_t threshold_lower,
     if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
 
     //cl_event read_buf_event;
-    clEnqueueReadBuffer(g_cmdQueue, g_buf_nonmax_out, CL_FALSE, 0, g_image_size*sizeof(uint8_t), out, 0, NULL, 0);
+    status = clEnqueueReadBuffer(g_cmdQueue, g_buf_nonmax_out, CL_FALSE, 0, g_image_size*sizeof(uint8_t), out, 0, NULL, 0);
+    if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
 
     clFinish(g_cmdQueue);
 }
