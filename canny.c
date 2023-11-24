@@ -204,6 +204,7 @@ void cannyEdgeDetection(
     cl_int status;
     cl_event write_buf_event, read_buf_event, sobel_event, phase_event, nonmax_event;
 
+    // Send the data to the GPU
     status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_in, CL_FALSE, 0, g_image_size*sizeof(uint8_t), input, 0, NULL, &write_buf_event);
     if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
 
@@ -213,8 +214,10 @@ void cannyEdgeDetection(
 
     cl_nonmax(width, height, threshold_lower, threshold_upper, &nonmax_event);
 
+    // Read data back to CPU
     status = clEnqueueReadBuffer(g_cmdQueue, g_buf_nonmax_out, CL_FALSE, 0, g_image_size*sizeof(uint8_t), output, 0, NULL, &read_buf_event);
     if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
+    // You MUST wait for all the data to come back, as CPU can't deal with incomplete data
     clFinish(g_cmdQueue);
 
     times[1] = gettimemono_ns();
