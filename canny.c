@@ -91,7 +91,7 @@ edgeTracing(uint8_t *restrict image, size_t width, size_t height) {
             if (image[y * width + x] == 255) {
                 coord_t yes_pixel = {x, y};
                 *tracing_stack_pointer = yes_pixel;
-                tracing_stack_pointer++;  // increments by sizeof(coord_t)
+                tracing_stack_pointer++;
             }
         }
     }
@@ -132,28 +132,11 @@ edgeTracing(uint8_t *restrict image, size_t width, size_t height) {
     // Clear all remaining MAYBE pixels to NO, these were not reachable from
     // any YES pixels
     // LOOP 4.5
-    // Unrolled the loop to single level
-    for (int n = 0; n < width*height; n++){
+    #pragma omp parallel for
+    for (size_t n = 0; n < width*height; n++){
         if (image[n] == 127) image[n] = 0;
     }
-
-}
-
-void cl_edgetracing(size_t width, size_t height){
-    // height and width determined as 16 bits -> max image size is 65 535 x 65 535 pixels
-    cl_int status;
-
-    // Associate the input and output buffers with the kernel
-    status = clSetKernelArg(g_sobel_kernel, 0, sizeof(cl_mem), &g_buf_sobel_in);
-    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
-    status = clSetKernelArg(g_sobel_kernel, 1, sizeof(cl_mem), &g_buf_sobel_out_x);
-
-
-
-    size_t globalWorkSize[2] = {width, height};     // 100x100 for x.pgm, 4444x4395 for hameensilta.pgm
-
-    status = clEnqueueNDRangeKernel(g_cmdQueue, g_sobel_kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, 0);
-    if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
+    free(tracing_stack);
 }
 
 
