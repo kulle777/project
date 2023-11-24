@@ -136,6 +136,14 @@ void cl_sobel(size_t width, size_t height, cl_event* event){
     // height and width determined as 16 bits -> max image size is 65 535 x 65 535 pixels
     cl_int status;
 
+    // Associate the input and output buffers with the kernel
+    status = clSetKernelArg(g_sobel_kernel, 0, sizeof(cl_mem), &g_buf_sobel_in);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+    status = clSetKernelArg(g_sobel_kernel, 1, sizeof(cl_mem), &g_buf_sobel_out_x);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+    status = clSetKernelArg(g_sobel_kernel, 2, sizeof(cl_mem), &g_buf_sobel_out_y);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+
     size_t globalWorkSize[2] = {width, height};     // 100x100 for x.pgm, 4444x4395 for hameensilta.pgm
 
     status = clEnqueueNDRangeKernel(g_cmdQueue, g_sobel_kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, event);
@@ -145,75 +153,82 @@ void cl_sobel(size_t width, size_t height, cl_event* event){
 
 void cl_phase(size_t width, size_t height, cl_event* event){
     cl_int status;
-
+    // Associate the input and output buffers with the kernel
+    status = clSetKernelArg(g_phase_kernel, 0, sizeof(cl_mem), &g_buf_sobel_out_x);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+    status = clSetKernelArg(g_phase_kernel, 1, sizeof(cl_mem), &g_buf_sobel_out_y);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+    status = clSetKernelArg(g_phase_kernel, 2, sizeof(cl_mem), &g_buf_phase_out);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+    status = clSetKernelArg(g_phase_kernel, 3, sizeof(cl_mem), &g_buf_magnitude_out);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
 
     size_t globalWorkSize[1] = {width*height};
 
-    //cl_event execution_event;
     status = clEnqueueNDRangeKernel(g_cmdQueue, g_phase_kernel, 1, NULL, globalWorkSize, NULL, 0, NULL, event);
     if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
 }
 
-void cl_nonmax(size_t width, size_t height, cl_event* event){
+
+void cl_nonmax(size_t width, size_t height, uint16_t threshold_lower,uint16_t threshold_upper, cl_event* event){
     cl_int status;
+    cl_ushort low = threshold_lower;
+    cl_ushort high = threshold_upper;
+    // Associate the input and output buffers with the kernel
+    status = clSetKernelArg(g_nonmax_kernel, 0, sizeof(cl_mem), &g_buf_magnitude_out);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+    status = clSetKernelArg(g_nonmax_kernel, 1, sizeof(cl_mem), &g_buf_phase_out);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+    status = clSetKernelArg(g_nonmax_kernel, 2, sizeof(cl_ushort), &low);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+    status = clSetKernelArg(g_nonmax_kernel, 3, sizeof(cl_ushort), &high);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+    status = clSetKernelArg(g_nonmax_kernel, 4, sizeof(cl_mem), &g_buf_nonmax_out);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
 
     size_t globalWorkSize[2] = {width,height};
 
-    //cl_event execution_event;
     status = clEnqueueNDRangeKernel(g_cmdQueue, g_nonmax_kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, event);
     if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}   
 }
 
 
-//KALLE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! This is the function that we put our stuff into
-void
-cannyEdgeDetection(
+// This is the main processing element of the code which sends kernels to the device. Moves data and captures timings
+void cannyEdgeDetection(
     uint8_t *restrict input, size_t width, size_t height,
     uint16_t threshold_lower, uint16_t threshold_upper,
     uint8_t *restrict output, double *restrict runtimes) {
 
-    uint64_t times[5];
+    uint64_t times[3];
+    times[0] = gettimemono_ns();
     cl_int status;
-
-    cl_event write_buf_event;
-    cl_event read_buf_event;
-    cl_event sobel_event;
-    cl_event phase_event;
-    cl_event nonmax_event;
+    cl_event write_buf_event, read_buf_event, sobel_event, phase_event, nonmax_event;
 
     status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_in, CL_FALSE, 0, g_image_size*sizeof(uint8_t), input, 0, NULL, &write_buf_event);
     if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
 
-    times[0] = gettimemono_ns();
-
     cl_sobel(width, height, &sobel_event);
 
-    times[1] = gettimemono_ns();
     cl_phase(width, height, &phase_event);
 
-    // I count moving data back from nonmax as part of nonmax
-    times[2] = gettimemono_ns();
-    cl_nonmax(width, height, &nonmax_event);
+    cl_nonmax(width, height, threshold_lower, threshold_upper, &nonmax_event);
+
     status = clEnqueueReadBuffer(g_cmdQueue, g_buf_nonmax_out, CL_FALSE, 0, g_image_size*sizeof(uint8_t), output, 0, NULL, &read_buf_event);
     if(status != CL_SUCCESS){printf("Error: Enque buffer. Err no %d\n",status);}
     clFinish(g_cmdQueue);
 
-    times[3] = gettimemono_ns();
+    times[1] = gettimemono_ns();
     edgeTracing(output, width, height);  // modifies output in-place
+    times[2] = gettimemono_ns();
 
-    times[4] = gettimemono_ns();
+    printf("Whole time of cannyEdgeDetection including delays and buffers %.2f ms\n", (times[2] - times[0])/1000000.);
+    printf("Time for clEnqueueWriteBuffer: %.2f ms\n", getStartEndTime(write_buf_event)/1000000.);
+    printf("Time for clEnqueueReadBuffer: %.2f ms\n", getStartEndTime(read_buf_event)/1000000.);
 
-
-    printf("Time for clEnqueueWriteBuffer: %.2f ms\n", (float)(getStartEndTime(write_buf_event))/1000000);
-    printf("Time for sobel: %.2f ms\n", (float)(getStartEndTime(sobel_event))/1000000);
-    printf("Time for phase: %.2f ms\n", (float)(getStartEndTime(phase_event))/1000000);
-    printf("Time for nonmax: %.2f ms\n", (float)(getStartEndTime(nonmax_event))/1000000);
-    printf("Time for clEnqueueReadBuffer: %.2f ms\n", (float)(getStartEndTime(read_buf_event))/1000000);
-
-    for (int i = 0; i < 4; i++) {
-        runtimes[i] = times[i + 1] - times[i];
-        runtimes[i] /= 1000000.0;  // Convert ns to ms
-    }
+    runtimes[0] = getStartEndTime(sobel_event)/1000000.;
+    runtimes[1] = getStartEndTime(phase_event)/1000000.;
+    runtimes[2] = getStartEndTime(nonmax_event)/1000000.;
+    runtimes[3] = (times[2] - times[1])/1000000.;
 }
 
 
@@ -293,7 +308,7 @@ init(
     free(max_work_items);
 
 
-    // Compile all the kernels beforehand and do the memory associations
+    // Compile all the kernels beforehand
 
     ////////////////////////////////////////////////Sobel//////////////////////////////////////////////////////////////////
     // Create a program with source code
@@ -313,13 +328,6 @@ init(
     }
     g_sobel_kernel = clCreateKernel(program, "sobel3x3", &status);
     if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
-    // Associate the input and output buffers with the kernel
-    status = clSetKernelArg(g_sobel_kernel, 0, sizeof(cl_mem), &g_buf_sobel_in);
-    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
-    status = clSetKernelArg(g_sobel_kernel, 1, sizeof(cl_mem), &g_buf_sobel_out_x);
-    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
-    status = clSetKernelArg(g_sobel_kernel, 2, sizeof(cl_mem), &g_buf_sobel_out_y);
-    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
     free(sobel_source);
     clReleaseProgram(program);
 
@@ -340,11 +348,6 @@ init(
     }
     g_phase_kernel = clCreateKernel(program, "phaseAndMagnitude", &status);
     if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
-    // Associate the input and output buffers with the kernel
-    status = clSetKernelArg(g_phase_kernel, 0, sizeof(cl_mem), &g_buf_sobel_out_x);
-    status = clSetKernelArg(g_phase_kernel, 1, sizeof(cl_mem), &g_buf_sobel_out_y);
-    status = clSetKernelArg(g_phase_kernel, 2, sizeof(cl_mem), &g_buf_phase_out);
-    status = clSetKernelArg(g_phase_kernel, 3, sizeof(cl_mem), &g_buf_magnitude_out);
     free(phase_source);
     clReleaseProgram(program);
 
@@ -365,14 +368,7 @@ init(
     }
     g_nonmax_kernel = clCreateKernel(program, "nonMaxSuppression", &status);
     if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
-    cl_ushort low = threshold_lower;
-    cl_ushort high = threshold_upper;
-    // Associate the input and output buffers with the kernel
-    status = clSetKernelArg(g_nonmax_kernel, 0, sizeof(cl_mem), &g_buf_magnitude_out);
-    status = clSetKernelArg(g_nonmax_kernel, 1, sizeof(cl_mem), &g_buf_phase_out);
-    status = clSetKernelArg(g_nonmax_kernel, 2, sizeof(cl_ushort), &low);
-    status = clSetKernelArg(g_nonmax_kernel, 3, sizeof(cl_ushort), &high);
-    status = clSetKernelArg(g_nonmax_kernel, 4, sizeof(cl_mem), &g_buf_nonmax_out);
+
     free(nonmax_source);
     clReleaseProgram(program);
 }
