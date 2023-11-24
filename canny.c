@@ -60,6 +60,13 @@ const coord_t neighbour_offsets[8] = {
 };
 
 
+// Jos voisin kaantaa logiikan ja laskea olenko MINA jonkun neighbour ja pitaisiko oma arvo muuttaa
+// Tuolloin parallelisoituisi. Sitten vaan laske KAIKKI... ongelma edelleen etta propagaatio ei ehka ole tapahtunut viela ja olisi pitanytkin menna YES pikseliksi.
+// Pitkaa laskea aina uudestaan kun tulee uusi yes pikseli.
+//HEIHEI ongelmaa datan kanssa EI OLE. Me voidaan aina kirjoittaa YES päälle. Sitten rekursiolla pitää vaan ajaa kyseinen jäbä uudelleen. Koskaan ei kirjoiteta 0 ajon aikana, joten ei voi kusta.
+
+// Toinen vaihtoehto: rekursio
+
 void
 edgeTracing(uint8_t *restrict image, size_t width, size_t height) {
     // Uses a stack-based approach to incrementally spread the YES
@@ -75,7 +82,7 @@ edgeTracing(uint8_t *restrict image, size_t width, size_t height) {
     coord_t *tracing_stack = malloc(width * height * sizeof(coord_t));
     coord_t *tracing_stack_pointer = tracing_stack;
 
-    
+
     // LOOP 4.1
     for (uint16_t y = 0; y < height; y++) {
         // LOOP 4.2
@@ -88,7 +95,7 @@ edgeTracing(uint8_t *restrict image, size_t width, size_t height) {
             }
         }
     }
-    
+
 
     // Empty the tracing stack one-by-one
     // LOOP 4.3
@@ -131,6 +138,24 @@ edgeTracing(uint8_t *restrict image, size_t width, size_t height) {
     }
 
 }
+
+void cl_edgetracing(size_t width, size_t height){
+    // height and width determined as 16 bits -> max image size is 65 535 x 65 535 pixels
+    cl_int status;
+
+    // Associate the input and output buffers with the kernel
+    status = clSetKernelArg(g_sobel_kernel, 0, sizeof(cl_mem), &g_buf_sobel_in);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+    status = clSetKernelArg(g_sobel_kernel, 1, sizeof(cl_mem), &g_buf_sobel_out_x);
+
+
+
+    size_t globalWorkSize[2] = {width, height};     // 100x100 for x.pgm, 4444x4395 for hameensilta.pgm
+
+    status = clEnqueueNDRangeKernel(g_cmdQueue, g_sobel_kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, 0);
+    if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
+}
+
 
 void cl_sobel(size_t width, size_t height, cl_event* event){
     // height and width determined as 16 bits -> max image size is 65 535 x 65 535 pixels
