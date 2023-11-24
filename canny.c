@@ -38,6 +38,10 @@ cl_mem g_buf_phase_out;
 cl_mem g_buf_magnitude_out;
 cl_mem g_buf_nonmax_out;
 
+cl_kernel g_sobel_kernel;
+cl_kernel g_phase_kernel;
+cl_kernel g_nonmax_kernel;
+
 size_t g_image_size;
 
 
@@ -133,34 +137,6 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height){
     // height and width determined as 16 bits -> max image size is 65 535 x 65 535 pixels
     cl_int status;
 
-    // Create a program with source code
-    char *sobel_source;
-    sobel_source = read_source("sobel.cl");
-
-    cl_program program = clCreateProgramWithSource(g_context, 1, (const char**)&sobel_source, NULL, &status);
-    if(status != CL_SUCCESS){printf("Error: Create program. Errno %d\n",status);}
-
-    status = clBuildProgram(program, g_numDevices, g_devices, NULL, NULL, NULL);
-    if(status != CL_SUCCESS){
-        size_t log_size;
-        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
-        char* log = (char*)malloc(log_size);
-        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
-        printf("Error: Build \n%s\n", log);
-        free(log);
-        return;
-    }
-
-    cl_kernel kernel;
-    kernel = clCreateKernel(program, "sobel3x3", &status);
-    if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
-
-
-    // Associate the input and output buffers with the kernel
-    status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &g_buf_sobel_in);
-    status = clSetKernelArg(kernel, 1, sizeof(cl_mem), &g_buf_sobel_out_x);
-    status = clSetKernelArg(kernel, 2, sizeof(cl_mem), &g_buf_sobel_out_y);
-
     //cl_event write_buf_event;
     status = clEnqueueWriteBuffer(g_cmdQueue, g_buf_sobel_in, CL_FALSE,
         0, g_image_size*sizeof(uint8_t), in, 0, NULL, 0);
@@ -168,110 +144,41 @@ void cl_sobel(const uint8_t *restrict in, size_t width, size_t height){
 
     size_t globalWorkSize[2] = {width, height};     // 100x100 for x.pgm, 4444x4395 for hameensilta.pgm
 
-    // Set the kernel for execution
     //cl_event execution_event;
-    status = clEnqueueNDRangeKernel(g_cmdQueue, kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, 0);
+    status = clEnqueueNDRangeKernel(g_cmdQueue, g_sobel_kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, 0);
     if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
 
     clFinish(g_cmdQueue);
-
-    free(sobel_source);
-    clReleaseKernel(kernel);
-    clReleaseProgram(program);
 }
 
 
 void cl_phase(size_t width, size_t height){
     cl_int status;
 
-    char *phase_source;
-    phase_source = read_source("phase.cl");
-
-    cl_program program = clCreateProgramWithSource(g_context, 1, (const char**)&phase_source, NULL, &status);
-    if(status != CL_SUCCESS){printf("Error: Create program. Errno %d\n",status);}
-
-    status = clBuildProgram(program, g_numDevices, g_devices,NULL, NULL, NULL);
-    if(status != CL_SUCCESS){
-        size_t log_size;
-        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
-        char* log = (char*)malloc(log_size);
-        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
-        printf("Error: Build \n%s\n", log);
-        free(log);
-        return;
-    }
-
-    cl_kernel kernel;
-    kernel = clCreateKernel(program, "phaseAndMagnitude", &status);
-    if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
-
-
-    // Associate the input and output buffers with the kernel
-    status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &g_buf_sobel_out_x);
-    status = clSetKernelArg(kernel, 1, sizeof(cl_mem), &g_buf_sobel_out_y);
-    status = clSetKernelArg(kernel, 2, sizeof(cl_mem), &g_buf_phase_out);
-    status = clSetKernelArg(kernel, 3, sizeof(cl_mem), &g_buf_magnitude_out);
-
 
     size_t globalWorkSize[1] = {width*height};
 
     //cl_event execution_event;
-    status = clEnqueueNDRangeKernel(g_cmdQueue, kernel, 1, NULL, globalWorkSize, NULL, 0, NULL, 0);
+    status = clEnqueueNDRangeKernel(g_cmdQueue, g_phase_kernel, 1, NULL, globalWorkSize, NULL, 0, NULL, 0);
     if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
 
     clFinish(g_cmdQueue);
-
-    free(phase_source);
-    clReleaseKernel(kernel);
-    clReleaseProgram(program);
 }
 
 void cl_nonmax(size_t width, size_t height, uint16_t threshold_lower,
                uint16_t threshold_upper, uint8_t *restrict out){
     cl_int status;
-    char *nonmax_source;
-    nonmax_source = read_source("nonmax.cl");
-    cl_program program = clCreateProgramWithSource(g_context, 1, (const char**)&nonmax_source, NULL, &status);
-    if(status != CL_SUCCESS){printf("Error: Create program. Errno %d\n",status);}
-    status = clBuildProgram(program, g_numDevices, g_devices,"-Werror", NULL, NULL);
-    if(status != CL_SUCCESS){
-        size_t log_size;
-        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
-        char* log = (char*)malloc(log_size);
-        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
-        printf("Error: Build \n%s\n", log);
-        free(log);
-        return;
-    }
-    cl_kernel kernel;
-    kernel = clCreateKernel(program, "nonMaxSuppression", &status);
-    if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
-
-    cl_ushort low = threshold_lower;
-    cl_ushort high = threshold_upper;
-
-
-    // Associate the input and output buffers with the kernel
-    status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &g_buf_magnitude_out);
-    status = clSetKernelArg(kernel, 1, sizeof(cl_mem), &g_buf_phase_out);
-    status = clSetKernelArg(kernel, 2, sizeof(cl_ushort), &low);
-    status = clSetKernelArg(kernel, 3, sizeof(cl_ushort), &high);
-    status = clSetKernelArg(kernel, 4, sizeof(cl_mem), &g_buf_nonmax_out);
 
     size_t globalWorkSize[2] = {width,height};
 
     //cl_event execution_event;
-    status = clEnqueueNDRangeKernel(g_cmdQueue, kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, 0);
+    status = clEnqueueNDRangeKernel(g_cmdQueue, g_nonmax_kernel, 2, NULL, globalWorkSize, NULL, 0, NULL, 0);
     if(status != CL_SUCCESS){printf("Error: Enque kernel. Err no %d\n",status);}
 
     //cl_event read_buf_event;
     clEnqueueReadBuffer(g_cmdQueue, g_buf_nonmax_out, CL_FALSE, 0, g_image_size*sizeof(uint8_t), out, 0, NULL, 0);
 
     clFinish(g_cmdQueue);
-
-    free(nonmax_source);
-    clReleaseKernel(kernel);
-    clReleaseProgram(program);
 }
 
 
@@ -380,11 +287,98 @@ init(
     printf("Max work item size must be less than 2**%zu\n", max_work_items[0]);
     free(max_work_items);
 
+
+    // Compile all the kernels beforehand and do the memory associations
+
+    ////////////////////////////////////////////////Sobel//////////////////////////////////////////////////////////////////
+    // Create a program with source code
+    char *sobel_source;
+    sobel_source = read_source("sobel.cl");
+    cl_program program = clCreateProgramWithSource(g_context, 1, (const char**)&sobel_source, NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: Create program. Errno %d\n",status);}
+    status = clBuildProgram(program, g_numDevices, g_devices, NULL, NULL, NULL);
+    if(status != CL_SUCCESS){
+        size_t log_size;
+        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
+        char* log = (char*)malloc(log_size);
+        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+        printf("Error: Build \n%s\n", log);
+        free(log);
+        return;
+    }
+    g_sobel_kernel = clCreateKernel(program, "sobel3x3", &status);
+    if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
+    // Associate the input and output buffers with the kernel
+    status = clSetKernelArg(g_sobel_kernel, 0, sizeof(cl_mem), &g_buf_sobel_in);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+    status = clSetKernelArg(g_sobel_kernel, 1, sizeof(cl_mem), &g_buf_sobel_out_x);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+    status = clSetKernelArg(g_sobel_kernel, 2, sizeof(cl_mem), &g_buf_sobel_out_y);
+    if(status != CL_SUCCESS){printf("Error: kernel arg. Err no %d\n",status);}
+    free(sobel_source);
+    clReleaseProgram(program);
+
+    ////////////////////////////////////////////////PhaseMagnitude//////////////////////////////////////////////////////////////////
+    char *phase_source;
+    phase_source = read_source("phase.cl");
+    program = clCreateProgramWithSource(g_context, 1, (const char**)&phase_source, NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: Create program. Errno %d\n",status);}
+    status = clBuildProgram(program, g_numDevices, g_devices,NULL, NULL, NULL);
+    if(status != CL_SUCCESS){
+        size_t log_size;
+        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
+        char* log = (char*)malloc(log_size);
+        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+        printf("Error: Build \n%s\n", log);
+        free(log);
+        return;
+    }
+    g_phase_kernel = clCreateKernel(program, "phaseAndMagnitude", &status);
+    if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
+    // Associate the input and output buffers with the kernel
+    status = clSetKernelArg(g_phase_kernel, 0, sizeof(cl_mem), &g_buf_sobel_out_x);
+    status = clSetKernelArg(g_phase_kernel, 1, sizeof(cl_mem), &g_buf_sobel_out_y);
+    status = clSetKernelArg(g_phase_kernel, 2, sizeof(cl_mem), &g_buf_phase_out);
+    status = clSetKernelArg(g_phase_kernel, 3, sizeof(cl_mem), &g_buf_magnitude_out);
+    free(phase_source);
+    clReleaseProgram(program);
+
+    ////////////////////////////////////////////////Nonmax//////////////////////////////////////////////////////////////////
+    char *nonmax_source;
+    nonmax_source = read_source("nonmax.cl");
+    program = clCreateProgramWithSource(g_context, 1, (const char**)&nonmax_source, NULL, &status);
+    if(status != CL_SUCCESS){printf("Error: Create program. Errno %d\n",status);}
+    status = clBuildProgram(program, g_numDevices, g_devices,"-Werror", NULL, NULL);
+    if(status != CL_SUCCESS){
+        size_t log_size;
+        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
+        char* log = (char*)malloc(log_size);
+        clGetProgramBuildInfo(program,g_devices[0],CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+        printf("Error: Build \n%s\n", log);
+        free(log);
+        return;
+    }
+    g_nonmax_kernel = clCreateKernel(program, "nonMaxSuppression", &status);
+    if(status != CL_SUCCESS){printf("Error: Create kernel. Err no %d\n",status);}
+    cl_ushort low = threshold_lower;
+    cl_ushort high = threshold_upper;
+    // Associate the input and output buffers with the kernel
+    status = clSetKernelArg(g_nonmax_kernel, 0, sizeof(cl_mem), &g_buf_magnitude_out);
+    status = clSetKernelArg(g_nonmax_kernel, 1, sizeof(cl_mem), &g_buf_phase_out);
+    status = clSetKernelArg(g_nonmax_kernel, 2, sizeof(cl_ushort), &low);
+    status = clSetKernelArg(g_nonmax_kernel, 3, sizeof(cl_ushort), &high);
+    status = clSetKernelArg(g_nonmax_kernel, 4, sizeof(cl_mem), &g_buf_nonmax_out);
+    free(nonmax_source);
+    clReleaseProgram(program);
 }
 
 void
 destroy() {
     // Free OpenCL resources
+    clReleaseKernel(g_nonmax_kernel);
+    clReleaseKernel(g_phase_kernel);
+    clReleaseKernel(g_sobel_kernel);
+
     clReleaseCommandQueue(g_cmdQueue);
     clReleaseMemObject(g_buf_sobel_in);
     clReleaseMemObject(g_buf_sobel_out_x);
